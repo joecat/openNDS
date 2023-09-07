@@ -54,12 +54,12 @@ do_ndsctl () {
 #### end of functions ####
 
 #########################################
-#					#
-#  Start - Main entry point		#
-#					#
+#										#
+#  Start - Main entry point				#
+#										#
 #  This script starts executing here	#
-#					#
-#					#
+#										#
+#										#
 #########################################
 
 # Get tmpfs mountpoint

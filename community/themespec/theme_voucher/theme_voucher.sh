@@ -28,8 +28,8 @@ header() {
 		<meta http-equiv=\"Expires\" content=\"0\">
 		<meta charset=\"utf-8\">
 		<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-		<link rel=\"shortcut icon\" href=\"/images/splash.jpg\" type=\"image/x-icon\">
-		<link rel=\"stylesheet\" type=\"text/css\" href=\"/splash.css\">
+		<link rel=\"shortcut icon\" href=\"$gatewayurl/images/splash.jpg\" type=\"image/x-icon\">
+		<link rel=\"stylesheet\" type=\"text/css\" href=\"$gatewayurl/splash.css\">
 		<title>$gatewayname</title>
 		</head>
 		<body>

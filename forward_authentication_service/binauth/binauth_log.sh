@@ -130,12 +130,12 @@ write_log () {
 
 
 #########################################
-#					#
-#  Start - Main entry point		#
-#					#
+#										#
+#  Start - Main entry point				#
+#										#
 #  This script starts executing here	#
-#					#
-#					#
+#										#
+#										#
 #########################################
 
 configure_log_location
