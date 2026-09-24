@@ -1,7 +1,7 @@
 <?php
 /* (c) Blue Wave Projects and Services 2015-2026. This software is released under the GNU GPL license.
 
- This is a FAS script providing an example of remote Forward Authentication for openNDS (NDS) on an http web server supporting PHP.
+ This is a FAS script providing an example of remote Forward Authentication for openNDS (NDS) on an **Internet hosted** https web server supporting PHP.
 
  The following NDS configurations must be set:
  1. fasport: Set to the port number the remote webserver is using (typically port 443)
@@ -18,21 +18,14 @@
 
  5. faskey: Matching $key as set in this script (see below this introduction).
 	This is a key phrase for NDS to encrypt the query string sent to FAS.
-	It can be any combination of A-Z, a-z and 0-9, up to 64 characters with no white space.
+	It can be any combination of A-Z, a-z and 0-9, with no white space.
 	eg c775e7b757ede630cd0aa1113bd102661ab38829ca52a6422ab782862f268646
 
- 6. fas_secure_enabled:  set to level 3
-	The NDS parameters: clientip, clientmac, gatewayname, client token, gatewayaddress, authdir and originurl
-	are encrypted using fas_key and passed to FAS in the query string.
+ 6. fas_secure_enabled:  set to level 4
+	The NDS parameters: clientip, clientmac, gatewayname, hid, gatewayaddress, authdir and originurl
+	are b64encoded and passed to FAS in the query string.
 
-	The query string will also contain a randomly generated initialization vector to be used by the FAS for decryption.
-
-	The "php-cli" package and the "php-openssl" module must both be installed for fas_secure level 2 and above.
-
- openNDS does not have "php-cli" and "php-openssl" as dependencies, but will exit gracefully at runtime if this package and module
- are not installed when fas_secure_enabled is set to level 2 or 3.
-
- The FAS must use the initialisation vector passed with the query string and the pre shared faskey to decrypt the required information.
+	The "php-cli" package and the "php-openssl" module are **NOT** required for fas_secure level 4.
 
  The remote web server (that runs this script) must have the "php-openssl" module installed (standard for most hosting services).
 
@@ -55,7 +48,7 @@
 */
 
 // Set the pre-shared key. This **MUST** be the same as faskey in the openNDS config.
-//	For example, use the sha256 hash of a secret string, but note also that if not present in the openNDS config, one will be generated and added there.
+//	For example, use the sha256 hash of a secret string, but note also that if not present in the openNDS config, one will be generated and added.
 //	See: /etc/config/opennds on the router.
 
 $key="c775e7b757ede630cd0aa1113bd102661ab38829ca52a6422ab782862f268646";
@@ -146,20 +139,9 @@ if (isset($_GET['status'])) {
 	@$redir_r=explode("fas=", $redir);
 	@$fas=$redir_r[1];
 
-	if (isset($_GET['iv'])) {
-		$iv=$_GET['iv'];
-	} else {
-		$iv="error";
-	}
-
 } else if (isset($_GET['fas']))  {
 	$fas=$_GET['fas'];
 
-	if (isset($_GET['iv'])) {
-		$iv=$_GET['iv'];
-	} else {
-		$iv="error";
-	}
 } else {
 	exit(0);
 }
@@ -226,15 +208,18 @@ function decrypt_parse() {
 		Note: $ndsparamlist is an array of parameter names to parse for.
 			Add your own custom parameters to **this array** as well as to the **config file**.
 			"admin_email" and "location" are examples of custom parameters.
+
+	Note - the query string is NOT encrypted in this fas-hid version, rather it is b64 encoded
 	*/
 
 	$cipher="AES-256-CBC";
 	$ndsparamlist=explode(" ", "clientip clientmac client_type gatewayname gatewayurl version hid gatewayaddress gatewaymac cpi_query originurl clientif admin_email location");
 
-	if (isset($_GET['fas']) and isset($_GET['iv']))  {
+	if (isset($_GET['fas']))  {
 		$string=$_GET['fas'];
-		$iv=$_GET['iv'];
-		$decrypted=openssl_decrypt( base64_decode( $string ), $cipher, $GLOBALS["key"], 0, $iv );
+
+		$decrypted=base64_decode($string);
+
 		$dec_r=explode(", ",$decrypted);
 
 		foreach ($ndsparamlist as $ndsparm) {
@@ -257,7 +242,7 @@ function get_image($url, $imagetype) {
 
 function auth_get_custom() {
 	// Add your own function to handle auth_get custom payload
-	$payload_decoded=base64_decode($_POST["payload"]);
+	$payload_decoded=base64_decode($_GET["payload"]);
 
 	$logpath=$GLOBALS["logpath"];
 	$log=date('Y-m-d H:i:s', $_SERVER['REQUEST_TIME']).
@@ -282,11 +267,7 @@ function auth_get_custom() {
 function auth_get_deauthed() {
 	// Add your own function to handle auth_get deauthed payload
 	// By default it isappended to the FAS deauth log
-	$payload_decoded=base64_decode($_POST["payload"]);
-
-	if (! str_contains($payload_decoded, 'method=')) {
-		$payload_decoded=base64_decode($payload_decoded);
-	}
+	$payload_decoded=base64_decode($_GET["payload"]);
 
 	$logpath=$GLOBALS["logpath"];
 	$log=date('Y-m-d H:i:s', $_SERVER['REQUEST_TIME']).
@@ -315,7 +296,7 @@ function auth_get() {
 		The auth list is sent to openNDS when authmon requests it.
 
 		auth_get:
-		auth_get is sent by authmon or libopennds in a POST request and can have the following values:
+		auth_get is sent by authmon or libopennds in a GET request and can have the following values:
 
 		1. Value "list".
 			FAS sends the auth list and deletes each client entry currently on that list.
@@ -342,31 +323,33 @@ function auth_get() {
 
 	$logpath=$GLOBALS["logpath"];
 
-	if (isset($_POST["auth_get"])) {
+	if (isset($_GET["auth_get"])) {
 
-		if (isset($_POST["gatewayhash"])) {
-			$gatewayhash=$_POST["gatewayhash"];
+		if (isset($_GET["gatewayhash"])) {
+			$gatewayhash=$_GET["gatewayhash"];
+
 		} else {
 			# invalid call, so:
 			exit(0);
 		}
 
-		if ($_POST["auth_get"] == "deauthed") {
+		if ($_GET["auth_get"] == "deauthed") {
 			auth_get_deauthed();
 			exit(0);
 		}
 
-		if ($_POST["auth_get"] == "custom") {
+		if ($_GET["auth_get"] == "custom") {
 			auth_get_custom();
 			exit(0);
 		}
 
 		if (! file_exists("$logpath"."$gatewayhash")) {
 			# no clients waiting, so:
+
 			exit(0);
 		}
 
-		if ($_POST["auth_get"] == "clear") {
+		if ($_GET["auth_get"] == "clear") {
 			$auth_list=scandir("$logpath"."$gatewayhash");
 			array_shift($auth_list);
 			array_shift($auth_list);
@@ -381,9 +364,9 @@ function auth_get() {
 		# Set default empty authlist:
 		$authlist="*";
 
-		$acklist=base64_decode($_POST["payload"]);
+		$acklist=base64_decode($_GET["payload"]);
 
-		if ($_POST["auth_get"] == "list") {
+		if ($_GET["auth_get"] == "list") {
 			$auth_list=scandir("$logpath"."$gatewayhash");
 			array_shift($auth_list);
 			array_shift($auth_list);
@@ -395,7 +378,7 @@ function auth_get() {
 			}
 			echo trim("$authlist");
 
-		} else if ($_POST["auth_get"] == "view") {
+		} else if ($_GET["auth_get"] == "view") {
 
 			if ($acklist != "none") {
 				$acklist_r=explode("\n",$acklist);
@@ -599,7 +582,6 @@ function thankyou_page() {
 	$me=$_SERVER['SCRIPT_NAME'];
 	$host=$_SERVER['HTTP_HOST'];
 	$fas=$GLOBALS["fas"];
-	$iv=$GLOBALS["iv"];
 	$clientip=$GLOBALS["clientip"];
 	$gatewayname=$GLOBALS["gatewayname"];
 	$gatewayaddress=$GLOBALS["gatewayaddress"];
@@ -625,7 +607,6 @@ function thankyou_page() {
 		</italic-black>
 		<form action=\"$me\" method=\"get\">
 			<input type=\"hidden\" name=\"fas\" value=\"$fas\">
-			<input type=\"hidden\" name=\"iv\" value=\"$iv\">
 			<input type=\"hidden\" name=\"auth\" value=\"$auth\">
 			<input type=\"hidden\" name=\"fullname\" value=\"$fullname_url\">
 			<input type=\"hidden\" name=\"email\" value=\"$email\">
@@ -642,7 +623,6 @@ function login_page() {
 	$fullname=$email="";
 	$me=$_SERVER['SCRIPT_NAME'];
 	$fas=$_GET["fas"];
-	$iv=$GLOBALS["iv"];
 	$clientip=$GLOBALS["clientip"];
 	$clientmac=$GLOBALS["clientmac"];
 	$gatewayname=$GLOBALS["gatewayname"];
@@ -673,7 +653,6 @@ function login_page() {
 			echo "
 				<form action=\"$me\" method=\"get\" >
 					<input type=\"hidden\" name=\"fas\" value=\"$fas\">
-					<input type=\"hidden\" name=\"iv\" value=\"$iv\">
 					<hr>Full Name:<br>
 					<input type=\"text\" name=\"fullname\" value=\"$fullname\">
 					<br>
@@ -737,7 +716,6 @@ function status_page() {
 function landing_page() {
 	$me=$_SERVER['SCRIPT_NAME'];
 	$fas=$_GET["fas"];
-	$iv=$GLOBALS["iv"];
 	$originurl=$GLOBALS["originurl"];
 	$gatewayaddress=$GLOBALS["gatewayaddress"];
 	$gatewayname=$GLOBALS["gatewayname"];
@@ -837,8 +815,9 @@ function err403() {
 		<div class=\"insert\">
 		<hr>
 		<b style=\"color:red; font-size:1.5em;\">Encryption Error <br> Access Forbidden</b><br>
-	";
 
+	";
+print_r ($GLOBALS);
 	flush();
 	footer();
 }
@@ -873,12 +852,10 @@ function read_terms() {
 	#terms of service button
 	$me=$_SERVER['SCRIPT_NAME'];
 	$fas=$GLOBALS["fas"];
-	$iv=$GLOBALS["iv"];
 
 	echo "
 		<form action=\"$me\" method=\"get\">
 			<input type=\"hidden\" name=\"fas\" value=\"$fas\">
-			<input type=\"hidden\" name=\"iv\" value=\"$iv\">
 			<input type=\"hidden\" name=\"terms\" value=\"yes\">
 			<input type=\"submit\" value=\"Read Terms of Service\" >
 		</form>

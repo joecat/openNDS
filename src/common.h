@@ -21,7 +21,7 @@
 /** @file common.h
     @brief Common constants and other bits
     @author Copyright (C) 2004 Philippe April <papril777@yahoo.com>
-    @author Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
+    @author Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
 */
 
 #ifndef _COMMON_H_
@@ -61,7 +61,7 @@
 #define QUERYMAXLEN 8192
 
 /* Max length of a query string in bytes */
-#define ENC_QUERYSTR (QUERYMAXLEN * 1.333)
+#define ENC_QUERYSTR (QUERYMAXLEN * 1.5)
 
 /* Separator for Preauth and Encrypted query string */
 #define QUERYSEPARATOR ", "

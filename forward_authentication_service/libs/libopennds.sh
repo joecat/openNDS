@@ -1,5 +1,5 @@
 #!/bin/sh
-#Copyright (C) BlueWave Projects and Services 2015-2023
+#Copyright (C) BlueWave Projects and Services 2015-2026
 #This software is released under the GNU GPL license.
 #
 # WARNING - shebang "sh" is for compatiblity with busybox ash (eg on OpenWrt)
@@ -79,9 +79,9 @@ webget() {
 	fetch=$(type -t uclient-fetch)
 
 	if [ -z "$fetch" ]; then
-		wret="wget $spider $checkcert -t 1 -T 4"
+		wret="wget -q $spider $checkcert -t 1 -T 4"
 	else
-		wret="uclient-fetch $spider $checkcert -T 4"
+		wret="uclient-fetch -q $spider $checkcert -T 4"
 	fi
 }
 
@@ -131,6 +131,10 @@ get_image_file() {
 		if [ ! -f "$mountpoint/ndsremote/$filename" ] || [ "$refresh" -eq 1 ]; then
 			# get protocol
 			protocol=$(echo "$imageurl" | awk -F'://' '{printf("%s", $1)}')
+
+			syslogmessage="protocol [$protocol]"
+			debugtype="debug"
+			write_to_syslog
 
 			if [ "$protocol" = "http" ]; then
 				#Try to download using http
@@ -185,7 +189,7 @@ get_image_file() {
 				destinationfile="$mountpoint/ndsremote/$filename"
 				cp "$sourcefile" "$destinationfile"
 			else
-				unsupported="Unsupported protocol [$protocol] for [$filename]in url [$imageurl] - skipping download"
+				unsupported="Unsupported protocol [$protocol] or invalid URL for [$filename]in url [$imageurl] - skipping download"
 				echo "$unsupported" | logger -p "daemon.err" -s -t "opennds[$ndspid]: "
 			fi
 		fi
@@ -231,6 +235,10 @@ get_data_file() {
 		if [ ! -f "$mountpoint/ndsdata/$filename" ] || [ "$refresh" -eq 1 ]; then
 			# get protocol
 			protocol=$(echo "$dataurl" | awk -F'://' '{printf("%s", $1)}')
+
+			syslogmessage="protocol [$protocol]"
+			debugtype="debug"
+			write_to_syslog
 
 			if [ "$protocol" = "http" ]; then
 				#Try to download using http
@@ -284,7 +292,7 @@ get_data_file() {
 				destinationfile="$mountpoint/ndsdata/$filename"
 				cp "$sourcefile" "$destinationfile"
 			else
-				unsupported="Unsupported protocol [$protocol] for [$filename]in url [$imageurl] - skipping download"
+				unsupported="Unsupported protocol [$protocol] or invalid URL for [$filename]in url [$dataurl] - skipping download"
 				echo "$unsupported" | logger -p "daemon.err" -s -t "opennds[$ndspid]: "
 			fi
 		fi
@@ -294,7 +302,7 @@ get_data_file() {
 
 # Function to send commands to openNDS:
 do_ndsctl () {
-	local timeout=8
+	local timeout=16
 
 	for tic in $(seq $timeout); do
 		ndsstatus="ready"
@@ -302,23 +310,23 @@ do_ndsctl () {
 
 		for keyword in $ndsctlout; do
 
-			if [ $keyword = "locked" ]; then
+			if [ "$keyword" = "locked" ] || [ "$keyword" = "busy," ]; then
 				ndsstatus="busy"
-				sleep 1
+				sleep 5
 				break
 			fi
 
-			if [ $keyword = "Failed" ]; then
+			if [ "$keyword" = "Failed" ]; then
 				ndsstatus="failed"
 				break
 			fi
 
-			if [ $keyword = "authenticated." ]; then
+			if [ "$keyword" = "authenticated." ]; then
 				ndsstatus="authenticated"
 				break
 			fi
 
-			if [ $keyword = "deauthenticated." ]; then
+			if [ "$keyword" = "deauthenticated." ]; then
 				ndsstatus="deauthenticated"
 				break
 			fi
@@ -632,11 +640,13 @@ urldecode() {
 htmlentityencode() {
 	entitylist="
 		s/\"/\&quot;/g
+		s/;/\&#59;/g
 		s/>/\&gt;/g
 		s/</\&lt;/g
 		s/%/\&#37;/g
 		s/'/\&#39;/g
 		s/\`/\&#96;/g
+		s/?/\&#63;/g
 	"
 	local buffer="$1"
 
@@ -645,17 +655,23 @@ htmlentityencode() {
 		buffer=$entityencoded
 	done
 
-	entityencoded=$(echo "$buffer" | awk '{ gsub(/\$/, "\\&#36;"); print }')
+	buffer=$(echo "$buffer" | awk '{ gsub(/\$/, "\\&#36;"); print }')
+	buffer=$(echo "$buffer" | awk '{ gsub(/\//, "\\&#47;"); print }')
+	buffer=$(echo "$buffer" | awk '{ gsub(/\\/, "\\&#92;"); print }')
+	entityencoded="$buffer"
 }
 
 
 htmlentitydecode() {
 	entitylist="
 		s/\&quot;/\"/g
+		s/\&#59;/;/g
 		s/\&gt;/>/g
 		s/\&lt;/</g
 		s/\&#37;/%/g
 		s/\&#39;/'/g
+		s/\&#96;/\`/g
+		s/\&#63;/?/g
 	"
 	local buffer="$1"
 
@@ -664,8 +680,10 @@ htmlentitydecode() {
 		buffer=$entitydecoded
 	done
 
-	buffer=$(echo "$buffer" | awk '{ gsub(/&#96;/, "\\`"); print }')
-	entitydecoded=$(echo "$buffer" | awk '{ gsub(/&#36;/, "\\$"); print }')
+	buffer=$(echo "$buffer" | awk '{ gsub(/&#36;/, "\\$"); print }')
+	buffer=$(echo "$buffer" | awk '{ gsub(/&#47;/, "\/"); print }')
+	buffer=$(echo "$buffer" | awk '{ gsub(/&#92;/, "\\`"); print }')
+	entitydecoded="$buffer"
 }
 
 get_client_zone () {
@@ -685,9 +703,9 @@ get_client_zone () {
 			local_mesh_if=$(echo "$client_if_string" | awk '{printf $3}')
 
 			if [ ! -z "$client_meshnode" ]; then
-				client_zone="MeshZone: $client_meshnode LocalInterface:$local_mesh_if"
+				client_zone="Zone: $client_meshnode - $local_mesh_if"
 			else
-				client_zone="LocalZone: $client_if"
+				client_zone="Zone: $client_if"
 			fi
 		else
 			client_zone=""
@@ -707,7 +725,7 @@ auth_log () {
 	authstat=$ndsctlout
 	# $authstat contains the response from do_ndsctl
 
-	loginfo="$userinfo, status=$authstat, mac=$clientmac, ip=$clientip, client_type=$client_type, zone=$client_zone, ua=$user_agent"
+	loginfo="$userinfo, status=$authstat, mac=$clientmac, ip=$clientip, client_type=$client_type, cpi_query=$cpi_query, zone=$client_zone, ua=$user_agent"
 	write_log
 	# We will not remove the client id file, rather we will let openNDS delete it on deauth/timeout
 }
@@ -859,66 +877,97 @@ serve_error_message () {
 
 # Configure custom input fields
 config_input_fields () {
-	if [ ! -z "$input" ]; then
-		if [ "$1" = "input" ]; then
-			#custom variable for form input is configured
-			inputremainder=$input
 
-			# Parse for each input field. Format is name:description:type, fields separated by ";" character
-			while true; do
-				inputtail="${inputremainder##*';'}"
-				inputremainder="${inputremainder%';'*}"
+	customvarlist=$(/usr/lib/opennds/libopennds.sh get_list_from_config 'fas_custom_variables_list')
+	input=""
 
-				fieldremainder=$inputtail
+	if [ ! -z "$customvarlist" ]; then
+		#Scan list for input fields
+		for customvar in $customvarlist; do
+			fieldlist=$(echo "$customvar" | awk -F "input=" '{printf "%s", $2}')
 
-				#inputlist must list in the reverse order to that defined in the custom var (input=....)
-				inputlist="type description name"
+			if [ ! -z "$fieldlist" ]; then
 
-				# For each field, get the values of name:description:type
-				for var in $inputlist; do
-					fieldtail="${fieldremainder##*':'}"
-					fieldremainder="${fieldremainder%':'*}"
-					htmlentityencode "$fieldtail"
-					fieldtail=$entityencoded
+				if [ -z "$input" ]; then
+					input="$fieldlist"
+					continue
+				else
+					input="$input;$fieldlist"
+					continue
+				fi
+			else
+				eval "$customvar"
+				continue
+			fi
 
-					eval $var=$(echo "\"$fieldtail\"")
 
-					if [ "$fieldtail" = "$fieldremainder" ]; then
+		done
+
+
+		urldecode "$input"
+		input="$urldecoded"
+
+		if [ ! -z "$input" ]; then
+			if [ "$1" = "input" ]; then
+				#custom variable for form input is configured
+				inputremainder=$input
+
+				# Parse for each input field. Format is name:description:type, fields separated by ";" character
+				while true; do
+					inputtail="${inputremainder##*';'}"
+					inputremainder="${inputremainder%';'*}"
+
+					fieldremainder=$inputtail
+
+					#inputlist must list in the reverse order to that defined in the custom var (input=....)
+					inputlist="type description name"
+
+					# For each field, get the values of name:description:type
+					for var in $inputlist; do
+						fieldtail="${fieldremainder##*':'}"
+						fieldremainder="${fieldremainder%':'*}"
+						htmlentityencode "$fieldtail"
+						fieldtail=$entityencoded
+
+						eval $var=$(echo "\"$fieldtail\"")
+
+						if [ "$fieldtail" = "$fieldremainder" ]; then
+							break
+						fi
+					done
+
+					# Make a list of field names
+					inputnames="$inputnames $name"
+
+
+					val=$(echo "$fasvars" | awk -F"$name=" '{print $2}' | awk -F', ' '{print $1}')
+
+					eval $name=$(echo "\"$val\"")
+
+					custom_inputs="
+						$custom_inputs
+						<input type=\"$type\" name=\"$name\" value=\"$val\" required autocomplete=\"on\" ><br><b>$description</b><br><br>
+					"
+
+					if [ "$inputtail" = "$inputremainder" ]; then
 						break
 					fi
 				done
 
-				# Make a list of field names
-				inputnames="$inputnames $name"
+			elif [ "$1" = "hidden" ]; then
 
+				for var in $inputnames; do
+					val=$(echo "$fasvars" | awk -F"$var=" '{print $2}' | awk -F', ' '{print $1}')
 
-				val=$(echo "$fasvars" | awk -F"$name=" '{print $2}' | awk -F', ' '{print $1}')
+					eval $var=$(echo "\"$val\"")
 
-				eval $name=$(echo "\"$val\"")
-
-				custom_inputs="
-					$custom_inputs
-					<input type=\"$type\" name=\"$name\" value=\"$val\" required autocomplete=\"on\" ><br><b>$description</b><br><br>
-				"
-
-				if [ "$inputtail" = "$inputremainder" ]; then
-					break
-				fi
-			done
-
-		elif [ "$1" = "hidden" ]; then
-
-			for var in $inputnames; do
-				val=$(echo "$fasvars" | awk -F"$var=" '{print $2}' | awk -F', ' '{print $1}')
-
-				eval $var=$(echo "\"$val\"")
-
-				userinfo="$userinfo, $var=$val"
-				custom_passthrough="
-					$custom_passthrough
-					<input type=\"hidden\" name=\"$var\" value=\"$val\" >
-				"
-			done
+					userinfo="$userinfo, $var=$val"
+					custom_passthrough="
+						$custom_passthrough
+						<input type=\"hidden\" name=\"$var\" value=\"$val\" >
+					"
+				done
+			fi
 		fi
 	fi
 }
@@ -937,14 +986,14 @@ check_mhd() {
 	local timeout=4
 
 	for tic in $(seq $timeout); do
+		timestamp=$(date +%s)
+		echo $timestamp > $heartbeatpath
 		mhd_get_status
 
 		if [ "$mhdstatus" = "2" ]; then
 			# MHD response fail - wait then try again:
 			sleep 1
 		elif [ "$mhdstatus" = "1" ]; then
-			timestamp=$(date +%s)
-			echo $timestamp > $heartbeatpath
 			break
 		fi
 	done
@@ -979,7 +1028,7 @@ check_mhd() {
 }
 
 nft_get_status() {
-	nfttest=$(nft -a list chain ip nds_filter ndsNET 2> /dev/null)
+	nfttest=$(nft -a list chain inet nds_filter ndsNET 2> /dev/null)
 
 	if [ ! -z "$nfttest" ]; then
 		nftstatus="1"
@@ -1009,6 +1058,10 @@ get_option_from_config() {
 	type uci &> /dev/null
 	uci_status=$?
 
+	if [ -z "$option" ]; then
+		return 1
+	fi
+
 	if [ $uci_status -eq 0 ]; then
 		param=$(uci export opennds | grep -w "option" | grep -w "$option" | awk -F"'" 'NF > 1 {printf "%s ", $2}')
 	else
@@ -1033,17 +1086,26 @@ get_list_from_config() {
 	# get list with urlencoded spaces
 
 	if [ $uci_status -eq 0 ]; then
-		param=$(uci export opennds | grep -w "list" | grep -w $list | awk -F"'" 'NF > 1 {print $2}' | sed "s/\s/%20/g" | awk '{printf "%s ", $0}')
+		param=$(uci export opennds | grep -w "list" | grep -w "$list" | awk -F"'" 'NF > 1 {print $2}' | awk '{printf "%s*", $0}')
 	else
-		param=$(cat /etc/config/opennds | grep -w "list" | grep -w "$list" | awk -F"#" '{printf "%s\n", $1}' | awk -F"'" 'NF > 1 {print $2}' | sed "s/\s/%20/g" | awk '{printf "%s ", $0}')
+		param=$(cat /etc/config/opennds | grep -w "list" | grep -w "$list" | awk -F"#" '{printf "%s\n", $1}' | awk -F"'" 'NF > 1 {print $2}' | awk '{printf "%s*", $0}')
 	fi
 
-	# remove trailing space character
-	param=$(echo "$param" | sed 's/[[:space:]]*$//')
+	# urlencode the entire list set
+	urlencode "$param"
+	param="$urlencoded"
 
-	if [ "$list" != "users_to_router" ] && [ "$list" != "preauthenticated_users" ] && [ "$list" != "authenticated_users" ]; then
+	# Restore spaces or newlines between list blocks
+
+	if [ -z "$newline" ]; then
+		param=$(echo "$param" | sed "s/*/\ /g")
+		# remove trailing space character
+		param=$(echo "$param" | sed 's/[[:space:]]*$//')
+	else
+		# urldecode
 		urldecode "$param"
-		param=$urldecoded
+		param="$urldecoded"
+		param=$(echo "$param" | tr "*" "\n")
 	fi
 
 	eval $list="$param" &>/dev/null
@@ -1055,7 +1117,7 @@ get_key_from_config() {
 	get_option_from_config
 
 	if [ -z "$faskey" ]; then
-		faskey="1234567890"
+		faskey=""
 	fi
 
 	key=$faskey
@@ -1078,18 +1140,35 @@ check_gw_mac() {
 }
 
 check_gw_ip() {
+	error_code=0
 
 	if [ -z "$ifname" ]; then
 		gw_ip="error"
 		error_code=1
-	else
+	fi
+
+	if [ "$error_code" -eq 0 ]; then
+		#Check if interface is wireless - if it is, exit
+		wireless_status=$(iw dev "$ifname" "info" &> /dev/null; echo -n $?)
+
+		if [ "$wireless_status" -eq 0 ]; then
+			gw_ip="error"
+			error_code=1
+			syslogmessage="Interface [ $ifname ] - Use of a wireless interface as gatewayinterface is forbidden. Configure a BRIDGE instead."
+			debugtype="err"
+			write_to_syslog
+		fi
+	fi
+
+	if [ "$error_code" -eq 0 ]; then
+		# Check if interface is an alias - if it is, exit
 		alias_check=$(ip -f inet addr | grep "inet" | awk '{printf "%s \n", $0}' | grep -c "$ifname ")
 
 		if [ "$alias_check" -ne 1 ]; then
 			gw_ip="error"
 			error_code=1
 			if [ "$alias_check" -gt 1 ]; then
-				syslogmessage="$ifname - IP address aliasing forbidden. Configure a VLAN instead."
+				syslogmessage="Interface [ $ifname ] - IP address aliasing is forbidden. Configure a VLAN instead."
 				debugtype="err"
 				write_to_syslog
 			fi
@@ -1102,7 +1181,15 @@ check_gw_ip() {
 }
 
 dhcp_check() {
-	dhcpdblocations="/tmp/dhcp.leases /var/lib/misc/dnsmasq.leases /var/db/dnsmasq.leases"
+	option="dhcp_leases_file"
+	get_option_from_config
+
+	if [ -z "$dhcp_leases_file" ] ; then
+		dhcpdblocations="/tmp/dhcp.leases /var/lib/misc/dnsmasq.leases /var/db/dnsmasq.leases"
+	else
+		dhcpdblocations="$dhcp_leases_file"
+	fi
+
 	dhcprecord=""
 	dbfile="no"
 
@@ -1127,38 +1214,28 @@ dhcp_check() {
 
 wait_for_interface () {
 	local ifname="$1"
-	local timeout=10
+	local timeout=30
 
 	for i in $(seq $timeout); do
+
 		if [ $(ip link show $ifname 2> /dev/null | grep -c -w "state UP") -eq 1 ]; then
 			ifstatus="up"
 			break
 		fi
-		sleep 1
+
+		syslogmessage="Iteration [ $i ], Interface [ $ifname ] is not up yet - waiting....."
+		debugtype="warn"
+		write_to_syslog
+
+		sleep 2
+
 		if [ $i == $timeout ] ; then
-			syslogmessage="$ifname is not up - giving up for now."
+			syslogmessage="Iteration [ $i ], Interface [ $ifname ] is not up - giving up for now."
 			debugtype="warn"
 			write_to_syslog
 			ifstatus="down"
 		fi
 	done
-}
-
-send_post_data () {
-	option="fas_secure_enabled"
-	get_option_from_config
-
-	if [ "$fas_secure_enabled" = "3" ] && [ -f "$mountpoint/ndscids/authmonargs" ]; then
-		configure_log_location
-		. $mountpoint/ndscids/ndsinfo
-		. $mountpoint/ndscids/authmonargs
-		postrequest="/usr/lib/opennds/post-request.php"
-
-		# Construct our user agent string:
-		user_agent="openNDS(libopennds;NDS:$version;)"
-		returned_data=$($phpcli -f "$postrequest" "$url" "$action" "$gatewayhash" "$user_agent" "$payload")
-
-	fi
 }
 
 users_to_router () {
@@ -1188,7 +1265,7 @@ users_to_router () {
 		inputchain=$(nft list table inet fw4 2> /dev/null | grep -w "$gatewayinterface" | grep "jump input"\
 			| awk -F" jump " '{print $2}' | awk -F" " '{print $1}')
 
-		rulehandle=$(nft -a list chain inet fw4 "$inputchain" 2> /dev/null | grep -w "users_to_router" | awk -F" " '{printf "%s" $NF}')
+		rulehandle=$(nft -a list chain inet fw4 "$inputchain" 2> /dev/null | grep -w "users_to_router" | awk -F" " '{printf "%s", $NF}')
 
 		if [ ! -z "$rulehandle" ]; then
 			nft delete rule inet fw4 "$inputchain" handle "$rulehandle" 2> /dev/null
@@ -1222,17 +1299,17 @@ delete_chains () {
 	delete_rule
 
 	# now we can delete our chains - the quickest way is to delete our tables:
-	nft delete table ip nds_filter 2> /dev/null
-	nft delete table ip nds_mangle 2> /dev/null
-	nft delete table ip nds_nat 2> /dev/null
+	nft delete table inet nds_filter 2> /dev/null
+	nft delete table inet nds_mangle 2> /dev/null
+	nft delete table inet nds_nat 2> /dev/null
 }
 
 delete_rule () {
 	# Requires table, src_chain and dst_chain variables
-	rule=$(nft -a list table ip "$table" 2> /dev/null | grep -w -A 30 "chain $src_chain" | grep -w "jump $dst_chain" | awk -F "handle " '{printf "%s", $2}')
+	rule=$(nft -a list table inet "$table" 2> /dev/null | grep -w -A 30 "chain $src_chain" | grep -w "jump $dst_chain" | awk -F "handle " '{printf "%s", $2}')
 
 	if [ ! -z "$rule" ]; then
-		nft delete rule ip "$table" "$src_chain" handle "$rule"
+		nft delete rule inet "$table" "$src_chain" handle "$rule"
 	fi
 }
 
@@ -1271,12 +1348,12 @@ pre_setup () {
 	ndstables="nds_filter nds_mangle nds_nat"
 
 	for ndstable in $ndstables; do
-		nft list table ip "$ndstable" &>/dev/null
+		nft list table inet "$ndstable" &>/dev/null
 		ret=$?
 
 		if [ $ret -gt 0 ]; then
 			# Table does not exist
-			nft add table ip $ndstable
+			nft add table inet $ndstable
 			ret=$?
 
 			if [ $ret -gt 0 ]; then
@@ -1285,19 +1362,21 @@ pre_setup () {
 		fi
 	done
 
-
 	# add required chains
-	nft add chain ip nds_filter ndsINP "{ type filter hook input priority -100 ; }" 2> /dev/null
-	nft add chain ip nds_filter ndsFWD "{ type filter hook forward priority -100 ; }" 2> /dev/null
-	nft add chain ip nds_nat ndsPRE "{ type nat hook prerouting priority -100 ; }"
-	nft add chain ip nds_mangle ndsPRE "{ type filter hook prerouting priority -100 ; }"
-	nft add chain ip nds_mangle ndsPOST "{ type filter hook postrouting priority -100 ; }"
-	nft add chain ip nds_filter nds_allow_INP "{ type filter hook input priority 100 ; }"
-	nft add chain ip nds_filter nds_allow_FWD "{ type filter hook forward priority 100 ; }"
+	nft add chain inet nds_filter ndsINP "{ type filter hook input priority -100 ; }" 2> /dev/null
+	nft add chain inet nds_filter ndsFWD "{ type filter hook forward priority -100 ; }" 2> /dev/null
+	nft add chain inet nds_nat ndsPRE "{ type nat hook prerouting priority -100 ; }"
+	nft add chain inet nds_mangle ndsPRE "{ type filter hook prerouting priority -100 ; }"
+	nft add chain inet nds_mangle ndsPOST "{ type filter hook forward priority -100 ; }"
+	nft add chain inet nds_mangle ndsINC
+	nft add chain inet nds_mangle nds_ft_INC
+	nft add chain inet nds_filter nds_ft_OUT
+	nft add chain inet nds_filter nds_allow_INP "{ type filter hook input priority 100 ; }"
+	nft add chain inet nds_filter nds_allow_FWD "{ type filter hook forward priority 100 ; }"
 
 	# add initial rules
-	nft insert rule ip nds_filter nds_allow_INP iifname "\"$gatewayinterface\"" counter accept comment "\"!opennds: allow input\""
-	nft insert rule ip nds_filter nds_allow_FWD iifname "\"$gatewayinterface\"" counter accept comment "\"!opennds: allow forward\""
+	nft insert rule inet nds_filter nds_allow_INP iifname "\"$gatewayinterface\"" counter accept comment "\"!opennds: allow input\""
+	nft insert rule inet nds_filter nds_allow_FWD iifname "\"$gatewayinterface\"" counter accept comment "\"!opennds: allow forward\""
 
 	ret=$?
 
@@ -1315,26 +1394,26 @@ ipt_to_nft () {
 delete_client_rule () {
 
 	if [ "$nds_verdict" = "all" ]; then
-		local handles=$(nft -a list chain ip "$nds_table" "$nds_chain" | grep -w "$client_ip" | awk -F"handle " '{printf "%s ", $2}')
+		local handles=$(nft -a list chain inet "$nds_table" "$nds_chain" | grep -w "$client_ip" | awk -F"handle " '{printf "%s ", $2}')
 	else
-		local handles=$(nft -a list chain ip "$nds_table" "$nds_chain" | grep -w "$client_ip" | grep -w "$nds_verdict" | awk -F"handle " '{printf "%s ", $2}')
+		local handles=$(nft -a list chain inet "$nds_table" "$nds_chain" | grep -w "$client_ip" | grep -w "$nds_verdict" | awk -F"handle " '{printf "%s ", $2}')
 	fi
 
 	for rulehandle in $handles; do
-		nft delete rule ip $nds_table "$nds_chain" handle "$rulehandle" 2> /dev/null
+		nft delete rule inet $nds_table "$nds_chain" handle "$rulehandle" 2> /dev/null
 	done
 }
 
 replace_client_rule () {
 
 	if [ "$nds_verdict" = "all" ]; then
-		local handles=$(nft -a list chain ip "$nds_table" "$nds_chain" | grep -w "$client_ip" | awk -F"handle " '{printf "%s ", $2}')
+		local handles=$(nft -a list chain inet "$nds_table" "$nds_chain" | grep -w "$client_ip" | awk -F"handle " '{printf "%s ", $2}')
 	else
-		local handles=$(nft -a list chain ip "$nds_table" "$nds_chain" | grep -w "$client_ip" | grep -w "$nds_verdict" | awk -F"handle " '{printf "%s ", $2}')
+		local handles=$(nft -a list chain inet "$nds_table" "$nds_chain" | grep -w "$client_ip" | grep -w "$nds_verdict" | awk -F"handle " '{printf "%s ", $2}')
 	fi
 
 	for rulehandle in $handles; do
-		nft replace rule ip $nds_table "$nds_chain" handle "$rulehandle" "$new_rule" 2> /dev/null
+		nft replace rule inet $nds_table "$nds_chain" handle "$rulehandle" "$new_rule" 2> /dev/null
 	done
 }
 
@@ -1354,7 +1433,7 @@ nft_set () {
 
 		if [ $optipset -eq 1 ]; then
 			debugtype="warn"
-			syslogmessage="Warning: dnsmasq ipset complile option not available -- Upgrade to dnsmasq-full version. Unable to configure walled garden...."
+			syslogmessage="Warning: dnsmasq ipset complile option not available -- Upgrade to dnsmasq-full version. Unable to configure $nftsetname...."
 			write_to_syslog
 			exit 0
 		fi
@@ -1366,12 +1445,12 @@ nft_set () {
 
 			if [ $have_ipset -eq 1 ]; then
 				debugtype="warn"
-				syslogmessage="Warning: ipset utility not not available -- Install ipset utility. Unable to configure walled garden...."
+				syslogmessage="Warning: ipset utility not not available -- Install ipset utility. Unable to configure $nftsetname...."
 				write_to_syslog
 				exit 0
 			else
 				debugtype="warn"
-				syslogmessage="Warning: using deprecated legacy ipset utility -- Upgrade dnsmasq to version supporting nftsets. Configuring walled garden...."
+				syslogmessage="Warning: using deprecated legacy ipset utility -- Upgrade dnsmasq to version supporting nftsets. Configuring $nftsetname...."
 				write_to_syslog
 			fi
 		fi
@@ -1388,38 +1467,71 @@ nft_set () {
 
 		if [ -z "$uciconfig" ]; then
 			# Generic Linux
-			linnum=$(cat /etc/dnsmasq.conf | grep -n -w "walledgarden" | awk -F":" '{printf "%s", $1}')
-			sed "$linnum""d" "/etc/dnsmasq.conf"
+			linnum=$(cat /etc/dnsmasq.conf | grep -n -w "$nftsetname" | awk -F":" '{printf "%s", $1}')
+			sed "$linnum""d" "/etc/dnsmasq.conf" &>/dev/null
 		else
 			uci -q delete dhcp.nds_nftset
 			uci -q delete dhcp.@dnsmasq[0].ipset
 		fi
 
-		ipset destroy walledgarden &>/dev/null
+		ipset destroy "$nftsetname" &>/dev/null
 	else
 
 		if [ "$nftsetmode" = "add" ] || [ "$nftsetmode" = "insert" ]; then
 			# Add the set, add/insert the rule and the Dnsmasq config
-			nft add set ip nds_filter walledgarden { type ipv4_addr\; size 128\; }
+			nft add set inet nds_filter "$nftsetname" { type ipv4_addr\; size 128\; }
+			ret=$?
+
+			if [ "$ret" -ne 0 ]; then
+				debugtype="warn"
+				syslogmessage="Unable to create nftset [ $nftsetname ]"
+				write_to_syslog
+			fi
+
 
 			if [ $have_ipset ]; then
-				ipset create walledgarden hash:ip &>/dev/null
+				ipset create "$nftsetname" hash:ip &>/dev/null
 			fi
-			list="walledgarden_fqdn_list"
+
+			list="$nftsetname""_fqdn_list"
 			get_list_from_config
 			fqdns=$param
 			urldecode "$fqdns"
 			fqdns="$urldecoded"
+			debugtype="debug"
+			syslogmessage="list $list is [ $fqdns ]"
+			write_to_syslog
+			fqdnlist=""
 
-			list="walledgarden_port_list"
+			for fqdn in $fqdns; do
+				htmlentityencode "$fqdn"
+
+				if [ "$entityencoded" = "$fqdn" ]; then
+					fqdnlist="$fqdnlist $fqdn"
+				else
+					debugtype="warn"
+					syslogmessage="fqdn [ $fqdn ] is invalid, please remove it."
+					write_to_syslog
+				fi
+			done
+
+			fqdns="$fqdnlist"
+
+			list="$nftsetname""_port_list"
 			get_list_from_config
 			ports=$param
 			urldecode "$ports"
 			ports="$urldecoded"
 
+			if [ ! -z "$ports" ]; then
+				debugtype="debug"
+				syslogmessage="list $list is [ $ports ]"
+				write_to_syslog
+			fi
+
 			if [ -z "$ports" ]; then
-				nft $nftsetmode rule ip nds_filter ndsNET counter ip daddr @walledgarden accept
-				ret=$?
+				nft $nftsetmode rule inet nds_filter ndsNET counter ip daddr "@$nftsetname" "$nftruletype"
+
 			else
 				numports=$(echo $ports | tr -d "'" | awk '{printf NF}')
 
@@ -1427,7 +1539,7 @@ nft_set () {
 					ports=$(printf "$ports" | tr -d "'" | tr -s " " ",")
 				fi
 
-				nft $nftsetmode rule ip nds_filter ndsNET counter ip daddr @walledgarden tcp dport {$ports} accept
+				nft $nftsetmode rule inet nds_filter ndsNET counter ip daddr "@$nftsetname" tcp dport {"$ports"} "$nftruletype"
 			fi
 
 
@@ -1444,29 +1556,29 @@ nft_set () {
 					done
 
 					if [ ! -z "$nftsetconf" ]; then
-						nftsetconf="$nftsetconf/4#ip#nds_filter#walledgarden"
+						nftsetconf="$nftsetconf/4#ip#nds_filter#$nftsetname"
 						echo "$nftsetconf" >> "$conflocation"
 					fi
 
 				else
 					# OpenWrt
-					uci -q set dhcp.nds_nftset='ipset'
-					ucicmd="add_list dhcp.nds_nftset.name='$nftsetname'"
+					ucicmd="del dhcp.nds_$nftsetname"
 					echo $ucicmd | uci -q batch
-					uci -q set dhcp.nds_nftset.table='nds_filter'
-					uci -q set dhcp.nds_nftset.table_family='ip'
+					ucicmd="set dhcp.nds_$nftsetname='ipset'"
+					echo $ucicmd | uci -q batch
+					ucicmd="add_list dhcp.nds_$nftsetname.name='$nftsetname'"
+					echo $ucicmd | uci -q batch
+					ucicmd="set dhcp.nds_$nftsetname.table='nds_filter'"
+					echo $ucicmd | uci -q batch
+					ucicmd="set dhcp.nds_$nftsetname.table_family='inet'"
+					echo $ucicmd | uci -q batch
 
 					domains=$fqdns
 
 					for domain in $domains; do
-						ucicmd="add_list dhcp.nds_nftset.domain='$domain'"
+						ucicmd="add_list dhcp.nds_$nftsetname.domain='$domain'"
 						echo $ucicmd | uci -q batch
-						ipset="$ipset/$domain"
 					done
-
-					ipset="$ipset/walledgarden"
-					ucicmd="set dhcp.@dnsmasq[0].ipset='$ipset'"
-					echo $ucicmd | uci -q batch
 
 				fi
 
@@ -1482,8 +1594,9 @@ nft_set () {
 					done
 
 					if [ ! -z "$ipsetconf" ]; then
-						ipsetconf="$ipsetconf/walledgarden"
-						sed -i '/System\|walledgarden/d' $conflocation
+						ipsetconf="$ipsetconf/$nftsetname"
+						config=$(grep -v "$nftsetname" "$conflocation")
+						echo "$config" > "$conflocation"
 						echo "$ipsetconf" >> "$conflocation"
 					fi
 				else
@@ -1495,7 +1608,7 @@ nft_set () {
 					done
 
 					if [ ! -z "$ipsetconf" ]; then
-						ipsetconf="$ipsetconf/walledgarden"
+						ipsetconf="$ipsetconf/$nftsetname"
 
 						del_ipset="del_list dhcp.@dnsmasq[0].ipset='$ipsetconf'"
 						add_ipset="add_list dhcp.@dnsmasq[0].ipset='$ipsetconf'"
@@ -1559,6 +1672,7 @@ auth_restore () {
 	configure_log_location
 
 	authlog="$logdir""authlog.log"
+	preemptive_auth="$mountpoint/ndscids/preemptive_auth"
 
 	if [ ! -e "$authlog" ]; then
 		mkdir -p "$logdir"
@@ -1572,44 +1686,82 @@ auth_restore () {
 		touch "$binauthlog"
 	fi
 
+	if [ ! -e "$preemptive_auth" ]; then
+		mkdir -p "$preemptive_auth"
+	fi
+
 	# Get default quotas
+	option="sessiontimeout"
+	get_option_from_config
+
+	if [ -z "$sessiontimeout" ]; then
+		sessiontimeout=1440
+	fi
+
 	option="uploadquota"
 	get_option_from_config
+
+	if [ -z "$uploadquota" ]; then
+		uploadquota=0
+	fi
 
 	option="downloadquota"
 	get_option_from_config
 
+	if [ -z "$downloadquota" ]; then
+		downloadquota=0
+	fi
+
 	option="uploadrate"
 	get_option_from_config
+
+	if [ -z "$uploadrate" ]; then
+		uploadrate=0
+	fi
 
 	option="downloadrate"
 	get_option_from_config
 
-	# Check if ndsctl is ready and therefore opennds is running
+	if [ -z "$downloadrate" ]; then
+		downloadrate=0
+	fi
+
+	# Check if opennds is running
 	local timeout=15
 
 	for tic in $(seq $timeout); do
-		ndsctl status &> /dev/null
-		ndsstatus=$?
+		check_heartbeat
 
-		if [ $ndsstatus -eq 0 ]; then
+		if [ $dead -eq 0 ]; then
 			break
 		fi
 
 		sleep 1
 	done
 
-	if [ $ndsstatus -ne 0 ]; then
+	if [ $dead -ne 0 ]; then
 		# we should give up
-		echo "ndsctl failed to become ready - aborting auth_restore"
+		echo "opennds failed to become ready - aborting auth_restore"
 		exit 1
 	fi
 
+	# Scan authlog for clients to re-auth:
 	while read -r client; do
 		b64mac="$(echo "$client" | awk -F"=" '{printf("%s", $1)}')""=="
 		client_mac=$(ndsctl b64decode "$b64mac")
 
 		if [ -z "$client_mac" ]; then
+			continue
+		fi
+
+		# Skip client if it is in preemptivemac list
+		list="preemptivemac"
+		get_list_from_config
+
+		status=$(echo "$param" | grep -q "$client_mac"; echo $?)
+
+		if [ "$status" -eq 0 ]; then
+			# skip this client
 			continue
 		fi
 
@@ -1638,25 +1790,46 @@ auth_restore () {
 		fi
 
 		if [ $reauth -eq 1 ]; then
-			ndsctlcmd="auth $client_mac $sessiontimeout"
-			do_ndsctl
+			mac="$client_mac"
+			custom="auth_restore"
+			custom=$(ndsctl b64encode "$custom")
 
-			syslogmessage=$ndsctlout
-			# $syslogmessage contains the response from do_ndsctl
+			authstr="$mac,$sessiontimeout,$uploadrate,$downloadrate,$uploadquota,$downloadquota,$custom"
+			macstr=$(echo "$mac" | awk -F":" '{printf "%s%s%s%s%s%s", $1, $2, $3, $4, $5, $6}')
 
-			if [ "$ndsstatus" = "authenticated" ]; then
-				debugtype="notice"
-			else
-				debugtype="debug"
-			fi
-
-			write_to_syslog
+			# Create a file for OpenNDS to use for pre-emptive logins - gets deleted once processed
+			echo -n "$authstr" > "$preemptive_auth/$macstr"
 		fi
 
 	done < $authlog
 }
 
 create_client_ruleset () {
+	status=0
+
+	# Check for user_to_router essentials and append if missing
+	if [ "$ruleset_name" = "users_to_router" ]; then
+		essentials="allow%20udp%20port%2053 allow%20tcp%20port%2053 allow%20udp%20port%2067 allow%20tcp%20port%2022 allow%20tcp%20port%20443"
+		newrules=""
+
+		for rule in $ruleset; do
+			checkrule=$(echo "$essentials" | grep "$rule")
+
+			if [ -z "$checkrule" ]; then
+				newrules="$newrules $rule"
+			fi
+		done
+
+		ruleset="$essentials $newrules"
+
+	fi
+
+	# Check for authenticated_users and reverse the order of rules
+	if [ "$ruleset_name" = "authenticated_users" ]; then
+		ruleset=$(echo "$ruleset" | awk '{ for (i = NF; i > 0; i = i - 1) printf("%s ", $i) }')
+	fi
+
+
 
 	for rule in $ruleset; do
 		urldecode $rule
@@ -1679,10 +1852,59 @@ create_client_ruleset () {
 						*) verdict="drop";;
 					esac
 					;;
-				1) proto=$param;;
-				2) port=$param;;
-				3) portnum=$param;;
-				4) to_from=$param;;
+				1)
+					case $param in
+						"all") proto="";;
+						"tcp") proto="tcp";;
+						"udp") proto="udp";;
+						"port") port="port";;
+						"to") to_from="to";;
+						"from") to_from="from";;
+						*) ;;
+					esac
+					;;
+				2) #port=$param;;
+					if [ "$port" = "port" ]; then
+						portnum=$param
+					fi
+
+					if [ "$to" = "to" ] || [ "$from" = "from" ]; then
+						ipaddr=$param
+					fi
+
+					case $param in
+						"port") port="port";;
+						"to") to_from="to";;
+						"from") to_from="from";;
+						*) ;;
+					esac
+					;;
+				3) #portnum=$param;;
+					if [ "$port" = "port" ]; then
+						portnum=$param
+					fi
+
+					if [ "$to_from" = "to" ] || [ "$to_from" = "from" ]; then
+						ipaddr=$param
+					fi
+
+					case $param in
+						"to") to_from="to";;
+						"from") to_from="from";;
+						*) ;;
+					esac
+					;;
+				4) #to_from=$param;;
+					if [ "$to_from" = "to" ] || [ "$to_from" = "from" ]; then
+						ipaddr=$param
+					fi
+
+					case $param in
+						"to") to_from="to";;
+						"from") to_from="from";;
+						*) ;;
+					esac
+					;;
 				5) ipaddr=$param;;
 				*) ;;
 			esac
@@ -1696,55 +1918,322 @@ create_client_ruleset () {
 			"users_to_router") chain="ndsRTR";;
 		esac
 
-		if [ "$proto" = "all" ]; then
-			sdport=""
-			port=""
-			portnum=""
-			to_from=""
-			ipaddr=""
-		else
-			sdport="dport"
-		fi
-
-		if [ -z "$proto" ] || [ "$port" != "port" ]; then
+		if [ "$proto" = "all" ] || [ -z "$proto" ] || [ "$port" != "port" ]; then
 			proto=""
-			port=""
+			sdport=""
 			portnum=""
-			to_from=""
-			ipaddr=""
 		fi
 
-		if [ -z "$portnum" ]; then
-			dport=""
-		else
-			dport="dport"
+		if [ -z "$to_from" ]; then
+			sdaddr=""
+		fi
+
+		if [ "$to_from" = "to" ]; then
+
+			if [ ! -z "$portnum" ]; then
+				sdport="dport"
+			fi
+
+			sdaddr="daddr"
+
+		elif [ "$to_from" = "from" ]; then
+
+			if [ ! -z "$portnum" ]; then
+				sdport="sport"
+			fi
+
+			sdaddr="saddr"
+
+		elif [ -z "$to_from" ] && [ ! -z "$portnum" ]; then
+			sdport="dport"
 		fi
 
 		if [ -z "$ipaddr" ]; then
 			ipstr=""
 		else
-			ipstr="ip daddr $ipaddr"
+			ipstr="ip $sdaddr $ipaddr"
 		fi
 
 		if [ "$ruleset_name" = "authenticated_users" ]; then
-			nft insert rule ip nds_filter $chain index 1 "$ipstr" "$proto" "$dport" "$portnum" counter "$verdict"
+			nft insert rule inet nds_filter $chain index 2 "$ipstr" "$proto" "$sdport" "$portnum" counter "$verdict"
 			status=$?
 		fi
 
 		if [ "$ruleset_name" = "preauthenticated_users" ]; then
-			nft insert rule ip nds_filter $chain index 2 "$ipstr" "$proto" "$dport" "$portnum" counter "$verdict"
+			nft insert rule inet nds_filter $chain index 2 "$ipstr" "$proto" "$sdport" "$portnum" counter "$verdict"
 			status=$?
 		fi
 
 		if [ "$ruleset_name" = "users_to_router" ]; then
-			nft add rule ip nds_filter "$chain" "$proto" "$dport" "$portnum" counter "$verdict"
+			nft add rule inet nds_filter $chain "$ipstr" "$proto" "$sdport" "$portnum" counter "$verdict"
 			status=$?
 		fi
 
 	done
 
 	if [ "$ruleset_name" = "users_to_router" ]; then
-		nft add rule ip nds_filter $chain counter reject
+		# allow ping4 max 4 per second
+		nft insert rule inet nds_filter ndsRTR icmp type echo-request counter drop
+		nft insert rule inet nds_filter ndsRTR icmp type echo-request limit rate 4/second counter accept
+		# Block everything else
+		nft add rule inet nds_filter $chain counter reject
+	fi
+}
+
+hash_str () {
+	hashedstr=""
+	status=$(type sha256sum &>/dev/null; echo $?)
+
+	if [ "$status" -eq 0 ]; then
+		hashedstr=$(printf "%s" "$strtohash" | sha256sum | awk -F' ' '{printf $1}')
+	else
+		syslogmessage="The sha256sum utility cannot be found - please install it"
+		debugtype="err"
+		write_to_syslog
+	fi
+}
+
+wget_request () {
+	spider=""
+	checkcert=""
+
+	ndsctlcmd="b64encode \"$payload\""
+	do_ndsctl
+
+	payload=$ndsctlout
+
+	webget
+	retval=$($wret -O - -U "$user_agent" "$url?auth_get=$action&gatewayhash=$gatewayhash&payload=$payload")
+	status=$?
+ 
+	if [ $status -ne 0 ]; then
+		# Warning message for status and URL
+		syslogmessage="$wret failed with status $status on FAS URL $url."
+		debugtype="warn"
+		write_to_syslog
+
+		# Debug messages for additional details
+		syslogmessage="Action: $action"
+		debugtype="debug"
+		write_to_syslog
+
+		syslogmessage="Gateway Hash: $gatewayhash"
+		debugtype="debug"
+		write_to_syslog
+
+		syslogmessage="Payload: $payload"
+		debugtype="debug"
+		write_to_syslog
+	fi
+}
+
+send_post_data () {
+	configure_log_location
+	option="fas_secure_enabled"
+	get_option_from_config
+
+	if [ ! -z "$fas_secure_enabled" ] && [ "$fas_secure_enabled" -ge 3 ] && [ -f "$mountpoint/ndscids/authmonargs" ]; then
+		. $mountpoint/ndscids/ndsinfo
+		. $mountpoint/ndscids/authmonargs
+
+		returned_data=$(eval "$remoterequest" "\"$url\"" "\"$action\"" "\"$gatewayhash\"" "\"$user_agent\"" "\"$payload\"")
+
+		syslogmessage="send_post_data - action [$action], payload [$payload], fas_response [$returned_data]."
+		debugtype="info"
+		write_to_syslog
+	fi
+}
+
+preemptivemac() {
+	configure_log_location
+	binauthlog="$logdir""binauthlog.log"
+	preemptive_auth="$mountpoint/ndscids/preemptive_auth"
+
+	if [ ! -e "$binauthlog" ]; then
+		mkdir -p "$logdir"
+		touch "$binauthlog"
+	fi
+
+	# Get default quotas
+	option="sessiontimeout"
+	get_option_from_config
+
+	if [ -z "$sessiontimeout" ]; then
+		sessiontimeout=1440
+	fi
+
+	option="uploadquota"
+	get_option_from_config
+
+	if [ -z "$uploadquota" ]; then
+		uploadquota=0
+	fi
+
+	option="downloadquota"
+	get_option_from_config
+
+	if [ -z "$downloadquota" ]; then
+		downloadquota=0
+	fi
+
+	option="uploadrate"
+	get_option_from_config
+
+	if [ -z "$uploadrate" ]; then
+		uploadrate=0
+	fi
+
+	option="downloadrate"
+	get_option_from_config
+
+	if [ -z "$downloadrate" ]; then
+		downloadrate=0
+	fi
+
+	if [ -z "$1" ] || [ "$1" = "quiet" ]; then
+		list="preemptivemac"
+		get_list_from_config
+
+		if [ -z "$param" ]; then
+			return 0
+		fi
+	else
+		param="mac=\"$1\";sessiontimeout=$sessiontimeout;uploadrate=$uploadrate;downloadrate=$downloadrate;uploadquota=$uploadquota;downloadquota=$downloadquota;custom=\"preemptivemac-$1\""
+	fi
+
+	for listblock in $param; do
+		mac=""
+		eval $listblock
+		custom=$(ndsctl b64encode "$custom")
+
+		# skip this client if not in dhcp database
+		iptocheck="$mac"
+		dhcp_check
+
+		if [ -z "$dhcprecord" ]; then
+			continue
+		fi
+
+		# skip this client if already authenticated
+		is_authed=$(grep "$mac" "$binauthlog" | tail -1 | awk -F"method=" '{print $2}' | awk -F", " '{printf "%s", $1}')
+
+		if [ "$is_authed" = "\"ndsctl_auth\"" ] || [ "$is_authed" = "\"preemptive_auth\"" ]; then
+			continue
+		fi
+
+		authstr="$mac,$sessiontimeout,$uploadrate,$downloadrate,$uploadquota,$downloadquota,$custom"
+		macstr=$(echo "$mac" | awk -F":" '{printf "%s%s%s%s%s%s", $1, $2, $3, $4, $5, $6}')
+		echo -n "$authstr" > "$preemptive_auth/$macstr"
+
+		#b64authstr=$(ndsctl b64encode "$authstr")
+
+		#/usr/lib/opennds/libopennds.sh daemon_auth "$b64authstr" "quiet"
+	done
+}
+
+resolve_fqdn() {
+	fqdnaddress=""
+	local fqdn=$1
+	fqdnaddress=$(nslookup "$fqdn" | grep -w -A 1 "Name:" | grep "Address:" | awk -F "Address: " 'NR == 1 {print $2}')
+
+	if [ -z "$fqdnaddress" ]; then
+		option="gatewayinterface"
+		get_option_from_config
+
+		if [ -z "$gatewayinterface" ]; then
+			gatewayinterface="br-lan"
+		fi
+
+		ifname="$gatewayinterface"
+		check_gw_ip
+		fqdnaddress="$gw_ip"
+	fi
+}
+
+get_meshnode_list() {
+	type mesh11sd &>/dev/null && meshnode_list=$(mesh11sd stations | grep -w "Station" | awk '{printf "%s ", $2}')
+	local converted_maclist=""
+
+	if [ ! -z "$meshnode_list" ]; then
+		for nodemac in $meshnode_list; do
+			convert_from_la $nodemac
+			converted_maclist="$converted_maclist $mac_from_la"
+		done
+	fi
+
+	meshnode_list="$converted_maclist"
+}
+
+convert_to_la() {
+	local mac_to_convert="$1"
+
+	eval $(echo "$mac_to_convert" | awk -F":" '{printf "p1=%s p2=%s p3=%s p4=%s p5=%s p6=%s", $1 ,$2, $3, $4, $5, $6}')
+
+	la_check=$(printf '%x\n' "$(( 0x2 & 0x$p1 ))")
+
+	if [ "$la_check" -eq 0 ]; then
+		octet=$(printf '%x\n' "$(( 0x2 | 0x$p1 ))")
+	else
+		octet="$p1"
+	fi
+
+	mac_la="$octet:$p2:$p3:$p4:$p5:$p6"
+}
+
+convert_from_la() {
+	local mac_to_convert="$1"
+
+	eval $(echo "$mac_to_convert" | awk -F":" '{printf "p1=%s p2=%s p3=%s p4=%s p5=%s p6=%s", $1 ,$2, $3, $4, $5, $6}')
+
+	la_check=$(printf '%x\n' "$(( 0x2 & 0x$p1 ))")
+
+	if [ "$la_check" -eq 2 ]; then
+		octet=$(printf '%x\n' "$(( 0x2 ^ 0x$p1 ))")
+	else
+		octet="$p1"
+	fi
+
+	mac_from_la="$octet:$p2:$p3:$p4:$p5:$p6"
+}
+
+get_quotas_by_mac() {
+	quotas="0 0 0 0 0"
+	configure_log_location
+	cidfile=$(grep -r "$clientmac" "$mountpoint/ndscids" | tail -n 1 | awk -F 'ndscids/' '{print $2}' | awk -F ':' '{printf $1}')
+
+	if [ ! -z "$cidfile" ]; then
+		if [ -e "$mountpoint/ndscids/$cidfile" ]; then
+			. $mountpoint/ndscids/$cidfile
+		fi
+
+		if [ ! -z "$binauth_quotas" ] && [ "$binauth_quotas" -eq 1 ]; then
+			quotas="$sessiontimeout $upload_rate $download_rate $upload_quota $download_quota"
+		fi
+	else
+		# Override quotas for the client from the binauth log if client was shutdown_deauth
+		eval $(grep "$clientmac" "$mountpoint/ndslog/binauthlog.log" | awk -F"method=" '{print $2}' | grep "shutdown_deauth" | tail -1 | awk -F ", " '{printf "%s; %s; %s; %s; %s", $11, $12, $13, $14, $15}')
+
+		if [ -z "$sessiontimeout" ]; then
+			sessiontimeout=0
+		fi
+
+		if [ -z "$upload_rate" ]; then
+			upload_rate=0
+		fi
+
+		if [ -z "$download_rate" ]; then
+			download_rate=0
+		fi
+
+		if [ -z "$upload_quota" ]; then
+			upload_quota=0
+		fi
+
+		if [ -z "$download_quota" ]; then
+			download_quota=0
+		fi
+
+		quotas="$sessiontimeout $upload_rate $download_rate $upload_quota $download_quota"
 	fi
 }
 
@@ -1760,10 +2249,34 @@ create_client_ruleset () {
 #					#
 #########################################
 
-querystr=$1
+formatcheck=$(cat /etc/config/opennds | grep -q -w "config opennds 'setup'"; echo $?)
+
+if [ "$formatcheck" -eq 1 ]; then
+	exit 1
+fi
+
+querystr="$1"
+
 query_type=${querystr:0:9}
 
 if [ "$query_type" = "%3ffas%3d" ]; then
+
+	# Check for a valid b64encoded query string
+	querystrlen=$((${#querystr}))
+	query_frag=${querystr:10:($querystrlen - 2)}
+
+	query_frag=$(echo "$query_frag" | awk -F "%3d" '{printf "%s", $1}')
+	syslogmessage="query_frag [ $query_frag ]"
+	debugtype="debug"
+	write_to_syslog
+
+	syslogmessage="Probable attempted code injection detected"
+	debugtype="warn"
+
+	case $query_frag in
+		*[!A-Za-z0-9+/=]*) write_to_syslog; exit 1 ;;   # contains invalid character → reject
+	esac
+
 	#Display a splash page sequence using a Themespec
 
 	#################################
@@ -1789,21 +2302,21 @@ if [ "$query_type" = "%3ffas%3d" ]; then
 
 	# Preshared key
 	#########################################
-	# Default value is 1234567890 when faskey is not set in config
+	# There is no default value when faskey is not set in config
 	get_key_from_config
 
 	# Quotas and Data Rates
 	#########################################
 	# Set length of session in minutes (eg 24 hours is 1440 minutes - if set to 0 then defaults to global sessiontimeout value):
 	# eg for 100 mins:
-	# session_length="100"
+	# sessiontimeout="100"
 	#
 	# eg for 20 hours:
-	# session_length=$((20*60))
+	# sessiontimeout=$((20*60))
 	#
 	# eg for 20 hours and 30 minutes:
-	# session_length=$((20*60+30))
-	session_length="0"
+	# sessiontimeout=$((20*60+30))
+	sessiontimeout="0"
 
 	# Set Rate and Quota values for the client
 	# The session length, rate and quota values could be determined by this script, on a per client basis.
@@ -1813,13 +2326,13 @@ if [ "$query_type" = "%3ffas%3d" ]; then
 	upload_quota="0"
 	download_quota="0"
 
-	quotas="$session_length $upload_rate $download_rate $upload_quota $download_quota"
+	quotas="$sessiontimeout $upload_rate $download_rate $upload_quota $download_quota"
 	#########################################
 
 	# The list of Parameters sent from openNDS:
 	# Note you can add custom parameters to the config file and to read them you must also add them here.
 	# Custom parameters are "Portal" information and are the same for all clients eg "admin_email" and "location"
-	ndsparamlist="hid clientip clientmac client_type gatewayname gatewayurl version gatewayaddress gatewaymac originurl clientif"
+	ndsparamlist="hid clientip clientmac client_type cpi_query gatewayname gatewayurl version gatewayaddress gatewaymac originurl clientif"
 
 	# The list of FAS Variables used in the Login Dialogue generated by this script.
 	# These FAS variables received from the login form presented to the client.
@@ -1906,15 +2419,30 @@ elif [ "$1" = "get_option_from_config" ]; then
 	# $2 contains the option to get
 	option=$2
 	get_option_from_config
-	echo -n "$param"
-	exit 0
+	status=$?
+	printf "%s" "$param"
+	exit $status
 
 elif [ "$1" = "get_list_from_config" ]; then
 	# Get the config list value(s)
 	# $2 contains the list to get
+	# $3 contains the newline option, ie add a newline between each element
+
+	if [ ! -z "$3" ]; then
+		newline="newline"
+	else
+		newline=""
+	fi
+
 	list=$2
 	get_list_from_config
-	echo -n "$param"
+
+	#if [ -z "$newline" ]; then
+		printf "%s" "$param"
+	#else
+	#	echo "$param"
+	#fi
+
 	exit 0
 
 elif [ "$1" = "create_client_ruleset" ]; then
@@ -1924,7 +2452,7 @@ elif [ "$1" = "create_client_ruleset" ]; then
 	ruleset_name=$2
 	ruleset=$3
 	create_client_ruleset
-	exit 0
+	exit $status
 
 elif [ "$1" = "clean" ]; then
 	# Do a cleanup if asked and reply with tmpfs mountpoint
@@ -1986,6 +2514,10 @@ elif [ "$1" = "gatewayip" ]; then
 	# Returns gateway ip address or error message with error code
 	ifname=$2
 
+	if [ -z "$ifname" ]; then
+		exit 1
+	fi
+
 	wait_for_interface "$ifname"
 
 	if [ "$ifstatus"  = "up" ]; then
@@ -2011,9 +2543,11 @@ elif [ "$1" = "gatewayroute" ]; then
 		# We have a valid route to upstream (WAN) gateway, so:
 		# Check for bad router config
 		for var in $defaultif; do
+
 			if [ "$var" = "$ifname" ]; then
 				defaultif="-"
-				break
+				printf "$defaultif"
+				exit 0
 			fi
 		done
 
@@ -2027,11 +2561,14 @@ elif [ "$1" = "gatewayroute" ]; then
 			else
 				iface=$var
 				idx=0
+
+				# Check arp for the upstream gateway
 				arptest=$(ip -f inet neigh show | grep -w  "$iface" | grep -w  "$ipaddr")
 
-				if [ -z "$arptest" ]; then
-					continue
-				else
+				if [ ! -z "$arptest" ]; then
+					syslogmessage="Upstream link for interface [ $iface ] is in ipv4 arp table"
+					debugtype="debug"
+					write_to_syslog
 
 					for arg in $arptest; do
 
@@ -2041,12 +2578,118 @@ elif [ "$1" = "gatewayroute" ]; then
 							gatewayinterfaces="$gatewayinterfaces$online:$ipaddr,$iface "
 						fi
 					done
+
+					continue
 				fi
+
+				# If we ended up here, the arp check failed, so try pinging the gateway
+				syslogmessage="Upstream arp test for interface [ $iface ]failed - attempting gateway ping..."
+				debugtype="debug"
+				write_to_syslog
+
+				pingtest=$(ping -4 -c 1 -W 1 -I "$iface" "$ipaddr" &> /dev/null; echo $?)
+
+				if [ "$pingtest" -eq 0 ]; then
+					gatewayinterfaces="$gatewayinterfaces$online:$ipaddr,$iface "
+					continue
+				fi
+
+				# And if we ended up here, the upstream gateway did not respond to a ping
+				# If we ping something on the Internet every checkinterval for ever, we might eventually be blocked
+				# So use this test as a last resort
+				syslogmessage="Upstream gateway ping test for interface [ $iface ] failed - attempting fasremotefqdn ping..."
+				debugtype="debug"
+				write_to_syslog
+
+				option="fasremotefqdn"
+				get_option_from_config "$option"
+
+				if [ -z "$fasremotefqdn" ]; then
+					syslogmessage="fasrmotefqdn not defined, so try pinging CloudFlare..."
+					debugtype="debug"
+					write_to_syslog
+
+					fasremotefqdn="one.one.one.one"
+				fi
+
+				pingtest=$(ping -4 -c 1 -w 1 -I "$iface" "$fasremotefqdn" &>/dev/null; echo $?)
+
+				if [ "$pingtest" -eq 0 ]; then
+					gatewayinterfaces="$gatewayinterfaces$online:$ipaddr,$iface "
+					continue
+				fi
+
+				# If we failed all tests, we ended up here
+				gatewayinterfaces="$gatewayinterfaces$offline:$ipaddr,$iface "
 			fi
 		done
 	fi
 
 	printf "$gatewayinterfaces"
+
+	if [ ! -z "$gatewayinterfaces" ]; then
+		# check if flowtables exist and create or update them as required
+
+		# configure download flowtable
+
+		wandevices=""
+
+		for gatewayroute in $gatewayinterfaces; do
+			wandevice=$(echo "$gatewayroute" | awk -F "," '{printf "%s", $2}')
+			if [ -z "$wandevices" ]; then
+				wandevices="$wandevice"
+			else
+				wandevices=", $wandevice"
+			fi
+		done
+
+		handle=$(nft -a list flowtables | grep -w "ndsftINC" | awk -F "handle " '{printf "%s", $2}')
+
+		if [ ! -z "$handle" ]; then
+			ftdevices=$(nft -a list flowtables | grep -w -A 4 "ndsftINC" | awk -F "devices = " 'NF>1 {printf "%s", $2}' | tr -d "\"")
+
+			if [ "$ftdevices" != "{ $wandevices }" ]; then
+
+				rulehandles=$(nft -a list chain inet nds_mangle nds_ft_INC | grep "@ndsftINC"| awk -F "handle " '{printf "%s ", $2}')
+
+				for rulehandle in $rulehandles; do
+					nft delete rule inet nds_mangle nds_ft_INC handle "$rulehandle"
+				done
+
+				nft delete flowtable inet nds_mangle handle "$handle"
+				nft add flowtable inet nds_mangle ndsftINC "{ hook ingress priority -100 ; devices = { $wandevices } ; }" 2> /dev/null
+				nft add rule inet nds_mangle nds_ft_INC flow offload @ndsftINC counter
+				nft add rule inet nds_mangle nds_ft_INC counter return
+			fi
+		else
+			nft add flowtable inet nds_mangle ndsftINC "{ hook ingress priority -100 ; devices = { $wandevices } ; }" 2> /dev/null
+			nft add rule inet nds_mangle nds_ft_INC meta l4proto { tcp, udp } flow offload @ndsftINC counter
+			nft add rule inet nds_mangle nds_ft_INC counter return
+		fi
+	fi
+
+	# add upload flowtable
+
+	fttest=$(nft list flowtable inet nds_filter ndsftOUT &> /dev/null ; echo $?)
+
+	if [ $fttest -gt 0 ]; then
+		option="gatewayinterface"
+		get_option_from_config
+
+		if [ -z "$gatewayinterface" ]; then
+			gatewayinterface="br-lan"
+		fi
+
+		nft add flowtable inet nds_filter ndsftOUT "{ hook ingress priority -100 ; devices = { $gatewayinterface } ; }"
+	fi
+
+	ftruletest=$(nft list chain inet nds_filter nds_ft_OUT 2> /dev/null | grep -q -w "meta l4proto"; echo $?)
+
+	if [ $ftruletest -gt 0 ]; then
+		nft add rule inet nds_filter nds_ft_OUT meta l4proto { tcp, udp } flow offload @ndsftOUT counter
+		nft add rule inet nds_filter nds_ft_OUT counter return
+	fi
+
 	exit 0
 
 elif [ "$1" = "clientaddress" ]; then
@@ -2159,6 +2802,13 @@ elif [ "$1" = "download" ]; then
 elif [ "$1" = "debuglevel" ]; then
 	# Sets the debuglevel for externals
 	# $2 contains the debuglevel
+
+	if [ -z "$2" ]; then
+		get_debuglevel
+		printf %d "$debuglevel"
+		exit 1
+	fi
+
 	debuglevel=$2
 	configure_log_location
 	printf %d "$debuglevel" > "$mountpoint/ndsdebuglevel"
@@ -2282,7 +2932,7 @@ elif [ "$1" = "dhcpcheck" ]; then
 	# Returns the mac address that was allocated to the ip address
 	# 	or null and return code 1 if not allocated
 	#
-	# $2 contains the ip to check
+	# $2 contains the ip (or mac address) to check
 
 	if [ -z "$2" ]; then
 		exit 1
@@ -2297,6 +2947,63 @@ elif [ "$1" = "dhcpcheck" ]; then
 			exit 0
 		fi
 	fi
+
+elif [ "$1" = "auth" ]; then
+	# Auths a client by ip or mac address
+	# $2 contains the b64 encoded auth-string which has the format:
+	# mac|ip sessiontimeout uploadrate downloadrate uploadquota downloadquota encoded_customstring
+	# Returns the status of the auth request
+
+	if [ -z "$2" ]; then
+		exit 1
+	else
+
+		authstr=$(ndsctl b64decode "$2")
+
+		libcall="yes"
+		ndsctlcmd="auth $authstr"
+		do_ndsctl
+
+		if [ "$ndsstatus" = "authenticated" ]; then
+			debugtype="notice"
+		else
+			debugtype="debug"
+		fi
+
+		syslogmessage="$ndsctlout"
+		write_to_syslog
+	fi
+
+	exit 0
+
+elif [ "$1" = "daemon_auth" ]; then
+	# Initiates a daemon process to auth a client by ip or mac address
+	# Can be called from a binauth script
+	# $2 contains the b64 encoded auth-string which has the format:
+	# mac|ip sessiontimeout uploadrate downloadrate uploadquota downloadquota encoded_customstring
+	# Returns the pid of the daemon_deauth process
+	# The actual client deauth will be reported in the syslog if sucessful
+	# $3 contains the verbosity
+
+	if [ -z "$2" ]; then
+		exit 1
+	else
+
+		b64authstr="$2"
+
+		daemoncmd="/usr/lib/opennds/libopennds.sh auth $b64authstr"
+		ndsctlcmd="b64encode \"$daemoncmd\""
+		do_ndsctl
+
+		daemon_pid=$(/usr/lib/opennds/libopennds.sh "startdaemon" "$ndsctlout")
+
+		if [ -z "$3" ]; then
+			# return the daemon pid
+			printf "%s" "$daemonpid"
+		fi
+	fi
+
+	exit 0
 
 elif [ "$1" = "deauth" ]; then
 	# Deauths a client by ip or mac address
@@ -2333,8 +3040,10 @@ elif [ "$1" = "daemon_deauth" ]; then
 		ndsctlcmd="b64encode \"$daemoncmd\""
 		do_ndsctl
 
-		daemon_deauth=$(/usr/lib/opennds/libopennds.sh "startdaemon" "$ndsctlout")
-		echo "$daemon_deauth"
+		daemon_pid=$(/usr/lib/opennds/libopennds.sh "startdaemon" "$ndsctlout")
+
+		# return the daemon pid
+		echo "$daemon_pid"
 	fi
 
 	exit 0
@@ -2392,20 +3101,20 @@ elif [ "$1" = "htmlentitydecode" ]; then
 	fi
 
 elif [ "$1" = "send_to_fas_deauthed" ]; then
-	# Sends deauthed notification to an https fas
-	# $2 contains the deauthentication log.
+	# Sends deauthed notification to an https fas (usually called by binauth)
+	# $2 contains the deauthentication log. (will be b64encoded by send_post_data)
 	#
-	# The deauthentication log is of the format:
+	# The deauthentication log should be of the format:
 	# method=[method], clientmac=[clientmac], bytes_incoming=[bytes_incoming],
 	#	bytes_outgoing=[bytes_outgoing], session_start=[session_start],
-	#	session_end=$6, token=[token], custom=[custom data as sent to binauth]
+	#	session_end=[session_end], token=[token], custom=[custom data as sent to binauth]
 	#
 	# Returns exit code 0 if sent, 1 if failed
 
 	if [ -z "$2" ]; then
 		exit 1
 	else
-		payload=$2
+		payload="$2"
 		action="deauthed"
 		send_post_data
 		printf "%s" "$returned_data"
@@ -2414,7 +3123,7 @@ elif [ "$1" = "send_to_fas_deauthed" ]; then
 
 elif [ "$1" = "send_to_fas_custom" ]; then
 	# Sends a custom string to an https fas
-	# $2 contains the string to send
+	# $2 contains the string to send. (will be b64encoded by send_post_data)
 	#
 	# The format of the custom string is not defined, so is fully customisable.
 	#
@@ -2450,7 +3159,6 @@ elif [ "$1" = "users_to_router" ]; then
 
 elif [ "$1" = "pre_setup" ]; then
 	# creates/configures openNDS nftables base chains
-
 	# Returns exit code 0 if done, 1 if failed
 
 	pre_setup
@@ -2539,20 +3247,43 @@ elif [ "$1" = "ipt_to_nft" ]; then
 	exit $ret
 
 elif [ "$1" = "nftset" ]; then
-	# Creates walledgarden nftset
+	# Creates walledgarden or blocklist nftset
 	# $2 is add, insert or delete the rule
 	# $3 is the nftset name
+	# $4 is the rule type (accept, drop or reject)
 
 	if [ -z "$2" ]; then
 		exit 4
 	fi
 
+	nftsetmode=$2
+
 	if [ -z "$3" ]; then
 		exit 4
 	fi
 
-	nftsetmode=$2
-	nftsetname=$3
+	if [ -z "$4" ]; then
+		nftruletype="accept"
+	else
+		case $4 in
+			"accept") nftruletype="accept";;
+			"drop") nftruletype="drop";;
+			"reject") nftruletype="reject";;
+			*) nftruletype="accept";;
+		esac
+	fi
+
+	if [ "$3" = "walledgarden" ] && [ "$nftruletype" = "accept" ]; then
+		nftsetname="walledgarden"
+	elif [ "$3" = "blocklist" ]; then
+		nftsetname="blocklist"
+
+		if [ -z "$nftruletype" ]; then
+			nftruletype="block"
+		fi
+	else
+		exit 4
+	fi
 
 	nft_set
 
@@ -2630,7 +3361,10 @@ elif [ "$1" = "is_nodog" ]; then
 
 elif [ "$1" = "generate_key" ]; then
 	# Generate a key
-	date | sha256sum | awk '{printf "%s", $1}'
+	k1=$(date | sha256sum | awk '{printf "%s", $1}')
+	k2=$(tr -cd "[:digit:]" < /dev/urandom | head -c 64 | sha256sum)
+	printf "$k1$k2" | sha256sum | awk -F' ' '{printf $1}'
+
 	exit 0
 
 elif [ "$1" = "set_key" ]; then
@@ -2645,6 +3379,118 @@ elif [ "$1" = "set_key" ]; then
 
 	echo "$cmd" | $shell
 
+	exit 0
+
+elif [ "$1" = "hash_str" ]; then
+
+	if [ -z "$2" ]; then
+		exit 1
+	fi
+
+	strtohash="$2"
+	hash_str
+	printf "%s" "$hashedstr"
+	exit "$status"
+
+elif [ "$1" = "wget_request" ]; then
+
+	if [ -z "$2" ]; then
+		exit 1
+	fi
+
+	url="$2"
+	action="$3"
+	gatewayhash="$4"
+	user_agent="$5"
+	payload="$6"
+
+	wget_request
+
+	printf "%s" "$retval"
+	exit "$status"
+
+elif [ "$1" = "preemptivemac" ]; then
+	# where $2 is an optional client mac address to immediately pre-emptively authenticate
+	# If $2 is not set then the preemptivemac list is returned
+	preemptivemac "$2"
+
+	if [ "$2" = "quiet" ]; then
+		exit 0
+	fi
+
+	if [ -z "$2" ]; then
+		echo -n "$param"
+	fi
+
+	exit 0
+
+elif [ "$1" = "resolve_fqdn" ]; then
+	resolve_fqdn $2
+	printf "%s" "$fqdnaddress"
+
+	exit 0
+
+elif [ "$1" = "config_input_fields" ]; then
+	config_input_fields $2
+	echo "$custom_inputs"
+	echo "$custom_passthrough"
+
+	exit 0
+
+elif [ "$1" = "get_meshnode_list" ]; then
+	get_meshnode_list
+	echo "$meshnode_list"
+
+	exit 0
+
+elif [ "$1" = "get_next_preemptive_auth" ]; then
+	configure_log_location
+	auth_files=$(ls $mountpoint/ndscids/preemptive_auth)
+
+	if [ -z $auth_files ]; then
+		exit 1
+	fi
+
+	for auth_file in $auth_files; do
+
+		if [ -e "$mountpoint/ndscids/preemptive_auth/$auth_file" ]; then
+			cat "$mountpoint/ndscids/preemptive_auth/$auth_file"
+			rm "$mountpoint/ndscids/preemptive_auth/$auth_file"
+		fi
+
+		break
+	done
+
+	exit 0
+
+elif [ "$1" = "ipv6_routing" ]; then
+
+	is_uci=$(type uci &>/dev/null; echo $?)
+
+	if [ -z "$2" ] || [ "$is_uci" -gt 0 ]; then
+		# not OpenWrt compatible
+		exit 0
+
+	elif [ "$2" = "block" ]; then
+		uci set network.wan6.proto='none'
+		service network reload
+
+	elif [ "$2" = "allow" ]; then
+		uci set network.wan6.proto='dhcpv6'
+		service network reload
+	fi
+
+	exit 0
+
+elif [ "$1" = "get_quotas_by_mac" ]; then
+	clientmac="$2"
+	get_quotas_by_mac
+	syslogmessage="quotas for client [ $clientmac ] [ $quotas ]"
+	debugtype=debug
+	write_to_syslog
+
+	echo "$quotas"
+	exit 0
 fi
 
 ########################################################################

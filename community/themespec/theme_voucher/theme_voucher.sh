@@ -1,6 +1,6 @@
 #!/bin/sh
 #Copyright (C) The openNDS Contributors 2004-2023
-#Copyright (C) BlueWave Projects and Services 2015-2023
+#Copyright (C) BlueWave Projects and Services 2015-2024
 #Copyright (C) Francesco Servida 2023
 #This software is released under the GNU GPL license.
 #
@@ -130,7 +130,7 @@ check_voucher() {
 			# "Punch" the voucher by setting the timestamp to now
 			voucher_expiration=$(($current_time + $voucher_time_limit * 60))
 			# Override session length according to voucher
-			session_length=$voucher_time_limit
+			sessiontimeout=$voucher_time_limit
 			sed -i -r "s/($voucher.*,)(0)/\1$current_time/" $voucher_roll
 			return 0
 		else
@@ -142,7 +142,7 @@ check_voucher() {
 				time_remaining=$(( ($voucher_expiration - $current_time) / 60 ))
 				#echo "Voucher is still valid - You have $time_remaining minutes left <br>"
 				# Override session length according to voucher
-				session_length=$time_remaining
+				sessiontimeout=$time_remaining
 				# Nothing to change in the roll
 				return 0
 			else
@@ -169,7 +169,7 @@ voucher_validation() {
 		#echo "Voucher is Valid, click Continue to finish login<br>"
 
 		# Refresh quotas with ones imported from the voucher roll.
-		quotas="$session_length $upload_rate $download_rate $upload_quota $download_quota"
+		quotas="$sessiontimeout $upload_rate $download_rate $upload_quota $download_quota"
 		# Set voucher used (useful if for accounting reasons you track who received which voucher)
 		userinfo="$title - $voucher"
 
@@ -185,7 +185,7 @@ voucher_validation() {
 				</big-red>
 				<hr>
 			</p>
-			This voucher is valid for $session_length minutes.
+			This voucher is valid for $sessiontimeout minutes.
 			<hr>
 			<p>
 				<italic-black>
@@ -247,6 +247,19 @@ voucher_validation() {
 voucher_form() {
 	# Define a click to Continue form
 
+	# From openNDS v10.2.0 onwards, QL code scanning is supported to pre-fill the "voucher" field in this voucher_form page.
+	#
+	# The QL code must be of the link type and be of the following form:
+	#
+	# http://[gatewayfqdn]/login?voucher=[voucher_code]
+	#
+	# where [gatewayfqdn] defaults to status.client (can be set in the config)
+	# and [voucher_code] is of course the unique voucher code for the current user
+
+	# Get the voucher code:
+
+	voucher_code=$(echo "$cpi_query" | awk -F "voucher%3d" '{printf "%s", $2}' | awk -F "%26" '{printf "%s", $1}')
+
 	echo "
 		<med-blue>
 			Welcome!
@@ -258,7 +271,7 @@ voucher_form() {
 		<form action=\"/opennds_preauth/\" method=\"get\">
 			<input type=\"hidden\" name=\"fas\" value=\"$fas\"> 
 			<input type=\"checkbox\" name=\"tos\" value=\"accepted\" required> I accept the Terms of Service<br>
-			Voucher #: <input type=\"text\" name=\"voucher\" value=\"\" required><br>
+			Voucher #: <input type=\"text\" name=\"voucher\" value=\"$voucher_code\" required><br>
 			<input type=\"submit\" value=\"Connect\" >
 		</form>
 		<br>
@@ -438,14 +451,14 @@ display_terms() {
 #########################################
 # Set length of session in minutes (eg 24 hours is 1440 minutes - if set to 0 then defaults to global sessiontimeout value):
 # eg for 100 mins:
-# session_length="100"
+# sessiontimeout="100"
 #
 # eg for 20 hours:
-# session_length=$((20*60))
+# sessiontimeout=$((20*60))
 #
 # eg for 20 hours and 30 minutes:
-# session_length=$((20*60+30))
-session_length="0"
+# sessiontimeout=$((20*60+30))
+sessiontimeout="0"
 
 # Set Rate and Quota values for the client
 # The session length, rate and quota values could be determined by this script, on a per client basis.
@@ -455,7 +468,7 @@ download_rate="0"
 upload_quota="0"
 download_quota="0"
 
-quotas="$session_length $upload_rate $download_rate $upload_quota $download_quota"
+quotas="$sessiontimeout $upload_rate $download_rate $upload_quota $download_quota"
 
 # Define the list of Parameters we expect to be sent sent from openNDS ($ndsparamlist):
 # Note you can add custom parameters to the config file and to read them you must also add them here.

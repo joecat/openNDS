@@ -1,6 +1,6 @@
 #!/bin/sh
 #Copyright (C) The openNDS Contributors 2004-2022
-#Copyright (C) BlueWave Projects and Services 2015-2023
+#Copyright (C) BlueWave Projects and Services 2015-2026
 #This software is released under the GNU GPL license.
 #
 # Warning - shebang sh is for compatibliity with busybox ash (eg on OpenWrt)
@@ -47,7 +47,7 @@ footer() {
 		<hr>
 		<div style=\"font-size:0.5em;\">
 			<br>
-			<img style=\"height:60px; width:60px; float:left;\" src=\"$gatewayurl""$imagepath\" alt=\"Splash Page: For access to the Internet.\">
+			<img style=\"height:60px; float:left;\" src=\"$gatewayurl""$imagepath\" alt=\"Splash Page: For access to the Internet.\">
 			&copy; Portal: BlueWave Projects and Services 2015 - $year<br>
 			<br>
 			Portal Version: $version
@@ -82,7 +82,7 @@ continue_form() {
 
 	echo "
 		<big-red>Welcome!</big-red><br>
-		<med-blue>You are connected to $client_zone</med-blue><br>
+		<med-blue>You are connected to <br>$client_zone</med-blue><br>
 		<italic-black>
 			To access the Internet you must Accept the Terms of Service.
 		</italic-black>
@@ -183,7 +183,7 @@ landing_page() {
 			Click or tap Continue to show the status of your account.
 		</p>
 		<form>
-			<input type=\"button\" VALUE=\"Continue\" onClick=\"location.href='$gatewayurl'\" >
+			<input type=\"button\" VALUE=\"Continue\" onClick=\"location.href='http://$gatewayfqdn/?$randquery'\" >
 		</form>
 		<hr>
 	"
@@ -205,7 +205,7 @@ landing_page() {
 			Click or tap Continue to try again.
 		</p>
 		<form>
-			<input type=\"button\" VALUE=\"Continue\" onClick=\"location.href='http://$gatewayfqdn'\" >
+			<input type=\"button\" VALUE=\"Continue\" onClick=\"location.href='http://$gatewayfqdn/?$randquery'\" >
 		</form>
 		<hr>
 	"
@@ -411,18 +411,21 @@ display_terms() {
 #						#
 #################################################
 
+
+randquery="$(date | sha256sum | awk '{printf "%s", $1}')"
+
 # Quotas and Data Rates
 #########################################
 # Set length of session in minutes (eg 24 hours is 1440 minutes - if set to 0 then defaults to global sessiontimeout value):
 # eg for 100 mins:
-# session_length="100"
+# sessiontimeout="100"
 #
 # eg for 20 hours:
-# session_length=$((20*60))
+# sessiontimeout=$((20*60))
 #
 # eg for 20 hours and 30 minutes:
-# session_length=$((20*60+30))
-session_length="0"
+# sessiontimeout=$((20*60+30))
+sessiontimeout="0"
 
 # Set Rate and Quota values for the client
 # The session length, rate and quota values could be determined by this script, on a per client basis.
@@ -432,7 +435,7 @@ download_rate="0"
 upload_quota="0"
 download_quota="0"
 
-quotas="$session_length $upload_rate $download_rate $upload_quota $download_quota"
+quotas="$sessiontimeout $upload_rate $download_rate $upload_quota $download_quota"
 
 # Define the list of Parameters we expect to be sent sent from openNDS ($ndsparamlist):
 # Note you can add custom parameters to the config file and to read them you must also add them here.

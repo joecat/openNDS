@@ -1,5 +1,5 @@
 #!/bin/sh
-#Copyright (C) BlueWave Projects and Services 2015-2023
+#Copyright (C) BlueWave Projects and Services 2015-2026
 #This software is released under the GNU GPL license.
 #
 status=$1
@@ -26,6 +26,37 @@ do_ndsctl () {
 			break
 		fi
 	done
+}
+
+urlencode() {
+	entitylist="
+		s/%/%25/g
+		s/\s/%20/g
+		s/\"/%22/g
+		s/>/%3E/g
+		s/</%3C/g
+		s/'/%27/g
+		s/\`/%60/g
+	"
+	local buffer="$1"
+
+	for entity in $entitylist; do
+		urlencoded=$(echo "$buffer" | sed "$entity")
+		buffer=$urlencoded
+	done
+
+	urlencoded=$(echo "$buffer" | awk '{ gsub(/\$/, "\\%24"); print }')
+}
+
+get_option_from_config() {
+
+	if [ ! -z "$1" ]; then
+		param=$(/usr/lib/opennds/libopennds.sh get_option_from_config "$1")
+			# urlencode
+			urlencode "$param"
+			param=$urlencoded
+			eval $1="$param" &>/dev/null
+	fi
 }
 
 get_client_zone () {
@@ -177,7 +208,7 @@ footer() {
 		<hr>
 		<div style=\"font-size:0.5em;\">
 			<br>
-			<img style=\"height:60px; width:60px; float:left;\" src=\"$url/$imagepath\" alt=\"Splash Page: For access to the Internet.\">
+			<img style=\"height:60px; float:left;\" src=\"$url/$imagepath\" alt=\"Splash Page: For access to the Internet.\">
 			&copy; Portal: BlueWave Projects and Services 2015 - $year<br>
 			<br>
 			Portal Version: $version
@@ -271,13 +302,25 @@ body() {
 		fi
 
 	elif [ "$status" = "err511" ]; then
+		get_option_from_config "fasremoteip"
+		get_option_from_config "fasremotefqdn"
+		get_option_from_config "login_option_enabled"
 
-		pagebody="
-			<h1>To login, click or tap the Continue button</h1>
-			<form action=\"$url/login\" method=\"get\" target=\"_blank\">
-			<input type=\"submit\" value=\"Continue\" >
-			</form>
-		"
+		if [ -z "$fasremoteip" ] && [ -z "$fasremotefqdn" ] && [ "$login_option_enabled" -eq 0 ]; then
+			pagebody="
+				<h1>ERROR: Remote Portal Not Defined or Not Available.</h1>
+				<form action=\"$url/login\" method=\"get\" target=\"_self\">
+				<input type=\"submit\" value=\"Retry\" >
+				</form>
+			"
+		else
+			pagebody="
+				<h1>To login, click or tap the Continue button</h1>
+				<form action=\"$url/login\" method=\"get\" target=\"_self\">
+				<input type=\"submit\" value=\"Continue\" >
+				</form>
+			"
+		fi
 
 	else
 		exit 1

@@ -1,0 +1,28 @@
+#!/bin/sh
+#Copyright (C) BlueWave Projects and Services 2015-2026
+#This software is released under the GNU GPL license.
+#
+# WARNING - shebang "sh" is for compatiblity with busybox ash (eg on OpenWrt)
+# This is changed to "bash" automatically by Makefile for generic Linux
+
+# This is a wrapper for calling OpenNDS libraries
+# Mostly calls to libopennds.sh, but others also
+
+# === Pipe has priority — parsed exactly like command-line arguments (quotes/spaces work) ===
+if [ ! -t 0 ]; then
+	input=$(cat)
+	eval "set -- $input"
+fi
+# =============================================================================
+
+if [ -z "$1" ]; then
+	exit 1
+fi
+
+case $1 in
+	"get_client_interface") library="/usr/lib/opennds/get_client_interface.sh"; shift;;
+	*) library="/usr/lib/opennds/libopennds.sh";;
+esac
+
+"$library" "$@"
+exit $?

@@ -22,7 +22,7 @@
     @brief Firewall nftables functions
     @author Copyright (C) 2004 Philippe April <papril777@yahoo.com>
     @author Copyright (C) 2007 Paul Kube <nodogsplash@kokoro.ucsd.edu>
-    @author Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
+    @author Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
 */
 
 #ifndef _FW_IPTABLES_H_
@@ -42,7 +42,9 @@
 #define CHAIN_TO_INTERNET "ndsNET"
 #define CHAIN_TO_ROUTER "ndsRTR"
 #define CHAIN_OUTGOING  "ndsOUT"
+#define CHAIN_FT_OUT  "nds_ft_OUT"
 #define CHAIN_INCOMING  "ndsINC"
+#define CHAIN_FT_INC  "nds_ft_INC"
 #define CHAIN_UPLOAD_RATE  "ndsULR"
 #define CHAIN_DOWNLOAD_RATE  "ndsDLR"
 #define CHAIN_AUTHENTICATED     "ndsAUT"
@@ -51,10 +53,11 @@
 
 
 /** Used to mark packets, and characterize client state.  Unmarked packets are considered 'preauthenticated' */
-extern unsigned int  FW_MARK_PREAUTHENTICATED; /**< @brief 0: Actually not used as a packet mark */
-extern unsigned int  FW_MARK_AUTHENTICATED;    /**< @brief The client is authenticated */
-extern unsigned int  FW_MARK_TRUSTED;          /**< @brief The client is trusted */
-extern unsigned int  FW_MARK_MASK;             /**< @brief nftables mask: bitwise or of the others */
+extern unsigned int  FW_MARK_PREAUTHENTICATED;	/**< @brief 0: Actually not used as a packet mark */
+extern unsigned int  FW_MARK_AUTHENTICATED;	/**< @brief The client is authenticated */
+extern unsigned int  FW_MARK_AUTH_BLOCKED;	/**< @brief The client is authenticated but blocked */
+extern unsigned int  FW_MARK_TRUSTED;		/**< @brief The client is trusted */
+extern unsigned int  FW_MARK_MASK;		/**< @brief nftables mask: bitwise or of the others */
 
 
 /** @brief Initialize the firewall */

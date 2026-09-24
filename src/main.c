@@ -24,7 +24,7 @@
   @author Copyright (C) 2004 Philippe April <papril777@yahoo.com>
   @author Copyright (C) 2004 Alexandre Carmel-Veilleux <acv@miniguru.ca>
   @author Copyright (C) 2008 Paul Kube <nodogsplash@kokoro.ucsd.edu>
-  @author Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
+  @author Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
  */
 
 
@@ -75,9 +75,7 @@
 /* Check for libmicrohttp version at runtime
  *0.9.69 is the minimum version to prevent loss of special characters in form data (BinAuth and PreAuth) 
  */
-#define MIN_MHD_MAJOR 0
-#define MIN_MHD_MINOR 9
-#define MIN_MHD_PATCH 71
+#define MIN_MHD_VERSION "0.9.71"
 
 /** 
  * Remember the thread IDs of threads that simulate wait with pthread_cond_timedwait
@@ -172,7 +170,7 @@ termination_handler(int s)
 	}
 
 	// If authmon is running, kill it
-	if (config->fas_secure_enabled == 3) {
+	if (config->fas_secure_enabled == 3 || config->fas_secure_enabled == 4) {
 		debug(LOG_INFO, "Explicitly killing the authmon daemon");
 		safe_asprintf(&fasssl, "kill $(pgrep -f \"usr/lib/opennds/authmon.sh\") > /dev/null 2>&1");
 
@@ -199,11 +197,20 @@ termination_handler(int s)
 	execute_ret_url_encoded(msg, SMALL_BUF - 1, "/usr/lib/opennds/libopennds.sh nftset delete walledgarden");
 	free(msg);
 
+	// If Block List nftset exists, destroy it.
+	msg = safe_calloc(SMALL_BUF);
+	execute_ret_url_encoded(msg, SMALL_BUF - 1, "/usr/lib/opennds/libopennds.sh nftset delete blocklist");
+	free(msg);
+
 	// Restart dnsmasq
-	safe_asprintf(&dnscmd, "/usr/lib/opennds/dnsconfig.sh \"restart_only\" &");
+	dnscmd = safe_calloc(STATUS_BUF);
+	safe_snprintf(dnscmd, STATUS_BUF, "/usr/lib/opennds/dnsconfig.sh \"restart_only\" ");
 	debug(LOG_DEBUG, "restart command [ %s ]", dnscmd);
-	system(dnscmd);
-	debug(LOG_INFO, "Dnsmasq restarted");
+	if (system(dnscmd) == 0) {
+		debug(LOG_INFO, "Dnsmasq restarted");
+	} else {
+		debug(LOG_ERR, "Dnsmasq restart failed!");
+	}
 	free(dnscmd);
 
 	auth_client_deauth_all();
@@ -283,7 +290,7 @@ setup_from_config(void)
 	char *msg;
 	char *mark_auth;
 	char *lib_cmd;
-	char gwhash[256] = {0};
+	char gwhash[66] = {0};
 	char authmonpid[16] = {0};
 	char *socket;
 	char *fasurl = NULL;
@@ -294,6 +301,8 @@ setup_from_config(void)
 	char *preauth_dir = NULL;
 	char *debuglevel = NULL;
 	char libscript[] = "/usr/lib/opennds/libopennds.sh";
+	char themespec1[] = "/usr/lib/opennds/theme_click-to-continue.sh";
+	char themespec2[] = "/usr/lib/opennds/theme_user-email-login-basic.sh";
 	char gw_name_entityencoded[256] = {0};
 	char gw_name_urlencoded[256] = {0};
 	struct stat sb;
@@ -336,36 +345,19 @@ setup_from_config(void)
 	debug(LOG_INFO, "tmpfs mountpoint is [%s]", config->tmpfsmountpoint);
 
 	// Check for libmicrohttp version at runtime, ie actual installed version
-	int major = 0;
-	int minor = 0;
-	int patch = 0;
-	int outdated = 0;
 	const char *version = MHD_get_version();
 
 	debug(LOG_NOTICE, "MHD version is %s", version);
 
-	if (sscanf(version, "%d.%d.%d", &major, &minor, &patch) == 3) {
+	if (semver_is_outdated(version, MIN_MHD_VERSION)) {
+		debug(LOG_ERR, "libmicrohttpd is out of date, please upgrade to version %s or higher",
+			MIN_MHD_VERSION);
 
-		if (major < MIN_MHD_MAJOR) {
-			outdated = 1;
-
-		} else if (minor < MIN_MHD_MINOR) {
-			outdated = 1;
-
-		} else if (patch < MIN_MHD_PATCH) {
-			outdated = 1;
-		}
-
-		if (outdated == 1) {
-			debug(LOG_ERR, "libmicrohttpd is out of date, please upgrade to version %d.%d.%d or higher",
-				MIN_MHD_MAJOR, MIN_MHD_MINOR, MIN_MHD_PATCH);
-
-			if (config->use_outdated_mhd == 0) {
-				debug(LOG_ERR, "exiting...");
-				exit(1);
-			} else {
-				debug(LOG_ERR, "Attempting use of outdated MHD - Data may be corrupted or openNDS may fail...");
-			}
+		if (config->use_outdated_mhd == 0) {
+			debug(LOG_ERR, "exiting...");
+			exit(1);
+		} else {
+			debug(LOG_ERR, "Attempting use of outdated MHD - Data may be corrupted or openNDS may fail...");
 		}
 	}
 
@@ -374,7 +366,6 @@ setup_from_config(void)
 	int routercheck;
 
 	// Initialise config->ext_gateway and check router config
-	config->ext_gateway = safe_calloc(SMALL_BUF);
 	routercheck = check_routing(watchdog);
 
 	// Warn if Preemptive Authentication is enabled
@@ -474,11 +465,16 @@ setup_from_config(void)
 		free(msg);
 	}
 
+	if (strcmp(config->gw_fqdn, "status.client") == 0) {
+		free(config->gw_fqdn);
+		config->gw_fqdn = safe_strdup(config->gw_ip);
+	}
+
 	if (config->dhcp_default_url_enable == 1) {
 		debug(LOG_DEBUG, "Enabling RFC8910 support");
 		dnscmd = safe_calloc(STATUS_BUF);
 
-		if (strcmp(config->gw_fqdn, "disable") != 0 && strcmp(config->gw_fqdn, "disabled") != 0) {
+		if (strcmp(config->gw_fqdn, "disable") != 0 && strcmp(config->gw_fqdn, "disabled") != 0 && strcmp(config->gw_fqdn, "status.client") != 0) {
 			safe_snprintf(dnscmd, STATUS_BUF, "/usr/lib/opennds/dnsconfig.sh \"cpidconf\" \"%s\"", config->gw_fqdn);
 		} else {
 			safe_snprintf(dnscmd, STATUS_BUF, "/usr/lib/opennds/dnsconfig.sh \"cpidconf\" \"%s\"", config->gw_address);
@@ -507,32 +503,15 @@ setup_from_config(void)
 		free(msg);
 	}
 
-	// nft sets
-	// For Walled Garden - Check we have nftset support and if we do, set it up
-	if (config->walledgarden_fqdn_list) {
-
-		// If Walled Garden nftset exists, destroy it.
-		msg = safe_calloc(SMALL_BUF);
-
-		execute_ret_url_encoded(msg, SMALL_BUF - 1, "/usr/lib/opennds/libopennds.sh nftset delete walledgarden");
-		free(msg);
-
-		// Set up the Walled Garden
-		msg = safe_calloc(SMALL_BUF);
-
-		if (execute_ret_url_encoded(msg, STATUS_BUF - 1, "/usr/lib/opennds/libopennds.sh nftset insert walledgarden ") == 0) {
-			debug(LOG_INFO, "Walled Garden Setup Request sent");
-		}
-		free(msg);
-	}
-
-
-	// Restart dnsmasq
+	// Reload dnsmasq (because we need it to resolve our gateway fqdn) and wait for it
 	dnscmd = safe_calloc(STATUS_BUF);
-	safe_snprintf(dnscmd, STATUS_BUF, "/usr/lib/opennds/dnsconfig.sh \"restart_only\" &");
-	debug(LOG_DEBUG, "restart command [ %s ]", dnscmd);
-	system(dnscmd);
-	debug(LOG_INFO, "Dnsmasq restarted");
+	safe_snprintf(dnscmd, STATUS_BUF, "/usr/lib/opennds/dnsconfig.sh \"reload_only\" ");
+	debug(LOG_DEBUG, "reload command [ %s ]", dnscmd);
+	if (system(dnscmd) == 0) {
+		debug(LOG_INFO, "Dnsmasq reloading");
+	} else {
+		debug(LOG_ERR, "Dnsmasq reload failed!");
+	}
 	free(dnscmd);
 
 	// Encode gatewayname
@@ -592,27 +571,42 @@ setup_from_config(void)
 	if (config->login_option_enabled >= 1) {
 		debug(LOG_NOTICE, "Login option is Enabled using mode %d.\n", config->login_option_enabled);
 		config->preauth = safe_strdup(libscript);
+
+		if (config->login_option_enabled == 1) {
+			config->themespec_path = safe_strdup(themespec1);
+		} else if (config->login_option_enabled == 2) {
+			config->themespec_path = safe_strdup(themespec2);
+		}
+
 	} else if (config->login_option_enabled == 0 && config->fas_port == 0 && config->preauth == NULL) {
 		debug(LOG_NOTICE, "Click to Continue option is Enabled.\n");
 		config->preauth = safe_strdup(libscript);
-	} else if (config->login_option_enabled == 0 && config->fas_port == 0 && config->preauth != NULL) {
-		debug(LOG_NOTICE, "Custom PreAuth Script Enabled.\n");
+		config->themespec_path = safe_strdup(themespec1);
 	} else if (config->login_option_enabled == 0 && config->fas_port >= 1 ) {
 		debug(LOG_NOTICE, "FAS Enabled.\n");
 		config->preauth = NULL;
 	}
 
-	// If PreAuth is enabled, override any FAS configuration and check script exists
-	if (config->preauth) {
+	// Check sha256sum command is available
+	msg = safe_calloc(SMALL_BUF);
+
+	if (execute_ret_url_encoded(msg, SMALL_BUF - 1, "printf 'test' | sha256sum") == 0) {
+		safe_asprintf(&fashid, "sha256sum");
+		debug(LOG_NOTICE, "sha256sum provider is available");
+	} else {
+		debug(LOG_ERR, "sha256sum provider not available - please install package to provide it");
+		debug(LOG_ERR, "Exiting...");
+		exit(1);
+	}
+
+	config->fas_hid = safe_strdup(fashid);
+	free(fashid);
+	free(msg);
+
+	// If fasport not set, override any FAS configuration
+	if (config->fas_port == 443 && config->login_option_enabled > 0) {
 		debug(LOG_NOTICE, "Preauth is Enabled - Overriding FAS configuration.\n");
 		debug(LOG_INFO, "Preauth Script is %s\n", config->preauth);
-
-
-		if (!((stat(config->preauth, &sb) == 0) && S_ISREG(sb.st_mode) && (sb.st_mode & S_IXUSR))) {
-			debug(LOG_ERR, "Preauth script does not exist or is not executable: %s", config->preauth);
-			debug(LOG_ERR, "Exiting...");
-			exit(1);
-		}
 
 		//override all other FAS settings
 		config->fas_remoteip = safe_strdup(config->gw_ip);
@@ -627,9 +621,18 @@ setup_from_config(void)
 	// If FAS is enabled then set it up
 	if (config->fas_port) {
 		debug(LOG_INFO, "fas_secure_enabled is set to level %d", config->fas_secure_enabled);
+		debug(LOG_INFO, "fasremoteip is %s, fasremotefqdn is %s", config->fas_remoteip, config->fas_remotefqdn);
 
 		// Check the FAS remote IP address
-		if (config->fas_remoteip) {
+		if ((strcmp(config->fas_remoteip, "disabled") == 0) && (strcmp(config->fas_remotefqdn, "disabled") == 0)) {
+			debug(LOG_WARNING, "Remote FAS addressing is undefined, please configure it");
+			debug(LOG_DEBUG, "Setting undefined fas_remoteip");
+			config->fas_remoteip = safe_strdup(config->gw_ip);
+			config->fas_port = config->gw_port;
+		}
+
+		if (strcmp(config->fas_remoteip, "disabled") != 0) {
+
 			if (is_addr(config->fas_remoteip) == 1) {
 				debug(LOG_INFO, "fasremoteip - %s - is a valid IPv4 address...", config->fas_remoteip);
 			} else {
@@ -642,34 +645,14 @@ setup_from_config(void)
 		// Block fas port 80 if local FAS
 		snprintf(port, sizeof(port), "%u", config->fas_port);
 
-		if((strcmp(config->gw_ip, config->fas_remoteip) == 0) && (strcmp(port, "80") == 0)) {
+		if ((strcmp(config->gw_ip, config->fas_remoteip) == 0) && (strcmp(port, "80") == 0)) {
 			debug(LOG_ERR, "Invalid fasport - port 80 is reserved and cannot be used for local FAS...");
 			debug(LOG_ERR, "Exiting...");
 			exit(1);
 		}
 
-		// If FAS key is set, then check the prerequisites
-
-		// FAS secure Level >=1
-		if (config->fas_key && config->fas_secure_enabled >= 1) {
-			// Check sha256sum command is available
-			msg = safe_calloc(SMALL_BUF);
-
-			if (execute_ret_url_encoded(msg, SMALL_BUF - 1, "printf 'test' | sha256sum") == 0) {
-				safe_asprintf(&fashid, "sha256sum");
-				debug(LOG_NOTICE, "sha256sum provider is available");
-			} else {
-				debug(LOG_ERR, "sha256sum provider not available - please install package to provide it");
-				debug(LOG_ERR, "Exiting...");
-				exit(1);
-			}
-			config->fas_hid = safe_strdup(fashid);
-			free(fashid);
-			free(msg);
-		}
-
 		// FAS secure Level 2 and 3
-		if (config->fas_key && config->fas_secure_enabled >= 2) {
+		if (config->fas_key && config->fas_secure_enabled >= 2 && config->fas_secure_enabled <= 3) {
 			// PHP cli command can be php or php-cli depending on Linux version.
 			msg = safe_calloc(SMALL_BUF);
 
@@ -687,7 +670,7 @@ setup_from_config(void)
 			} else {
 				debug(LOG_ERR, "PHP packages PHP CLI and PHP OpenSSL are required");
 
-				if (config->fas_secure_enabled >= 3) {
+				if (config->fas_secure_enabled == 3) {
 					debug(LOG_ERR, "Package ca-bundle is required for level 3 (https)");
 				}
 
@@ -715,8 +698,8 @@ setup_from_config(void)
 			free(msg);
 		}
 
-		// set the protocol used, enforcing https for Level 3
-		if (config->fas_secure_enabled == 3) {
+		// set the protocol used, enforcing https for Level >= 3
+		if (config->fas_secure_enabled >= 3) {
 			snprintf(protocol, sizeof(protocol), "https");
 		} else {
 			snprintf(protocol, sizeof(protocol), "http");
@@ -741,20 +724,21 @@ setup_from_config(void)
 
 		// Check if authmon is running and if it is, kill it
 		safe_asprintf(&fasssl, "kill $(pgrep -f \"usr/lib/opennds/authmon.sh\") > /dev/null 2>&1");
-		system(fasssl);
+		if (system(fasssl) < 0) {
+			debug(LOG_ERR, "Error returned from system call - Continuing");
+		}
 		free(fasssl);
 
-		// Start the authmon daemon if configured for Level 3
-		if (config->fas_key && config->fas_secure_enabled == 3) {
+		// Start the authmon daemon if configured for Level >= 3
+		if (config->fas_key && config->fas_secure_enabled >= 3) {
 
 			// Get the sha256 digest of gatewayname
 			safe_asprintf(&fasssl,
-				"echo \"<?php echo openssl_digest('%s', 'sha256'); ?>\" | %s",
-				config->url_encoded_gw_name,
-				config->fas_ssl
+				"/usr/lib/opennds/libopennds.sh hash_str \"%s\"",
+				config->url_encoded_gw_name
 			);
 
-			if (execute_ret_url_encoded(gwhash, sizeof(gwhash) - 1, fasssl) == 0) {
+			if (execute_ret_url_encoded(gwhash, sizeof(gwhash), fasssl) == 0) {
 				safe_asprintf(&gatewayhash, "%s", gwhash);
 				debug(LOG_DEBUG, "gatewayname digest is: %s\n", gwhash);
 			} else {
@@ -774,7 +758,9 @@ setup_from_config(void)
 
 			debug(LOG_DEBUG, "authmon startup command is: %s\n", fasssl);
 
-			system(fasssl);
+			if (system(fasssl) != 0) {
+				debug(LOG_ERR, "Error returned from system call - Continuing");
+			}
 			free(fasssl);
 
 			// Check authmon is running
@@ -805,7 +791,7 @@ setup_from_config(void)
 		}
 
 		// Report the Pre-Shared key is not available
-		if (config->fas_secure_enabled >= 2 && config->fas_key == NULL) {
+		if (config->fas_secure_enabled >= 1 && config->fas_key == NULL) {
 			debug(LOG_ERR, "Error - faskey is not set - exiting...\n");
 			exit(1);
 		}
@@ -854,6 +840,63 @@ setup_from_config(void)
 	if (sizeof(time_t) == 4) {
 		debug(LOG_WARNING, "WARNING - Year 2038 bug detected in system (32 bit time). Continuing.....");
 	}
+
+	// Now initialize the firewall
+	if (iptables_fw_init() != 0) {
+		debug(LOG_ERR, "Error initializing firewall rules! Cleaning up");
+		iptables_fw_destroy();
+		debug(LOG_ERR, "Exiting because of error initializing firewall rules");
+		exit(1);
+	}
+
+	// Add rulesets
+	create_client_ruleset ("users_to_router", set_list_str("users_to_router", DEFAULT_USERS_TO_ROUTER, "2"));
+	create_client_ruleset ("preauthenticated_users", set_list_str("preauthenticated_users", DEFAULT_PREAUTHENTICATED_USERS, "2"));
+	create_client_ruleset ("authenticated_users", set_list_str("authenticated_users", DEFAULT_AUTHENTICATED_USERS, "2"));
+
+	// nft sets
+
+	// Clean up: If nftsets exist, destroy them.
+	msg = safe_calloc(SMALL_BUF);
+	execute_ret_url_encoded(msg, SMALL_BUF - 1, "/usr/lib/opennds/libopennds.sh nftset delete walledgarden");
+	free(msg);
+
+	msg = safe_calloc(SMALL_BUF);
+	execute_ret_url_encoded(msg, SMALL_BUF - 1, "/usr/lib/opennds/libopennds.sh nftset delete blocklist");
+	free(msg);
+
+
+	// Set up the Walled Garden
+	msg = safe_calloc(SMALL_BUF);
+
+	if (execute_ret_url_encoded(msg, STATUS_BUF - 1, "/usr/lib/opennds/libopennds.sh nftset insert walledgarden") == 0) {
+		debug(LOG_INFO, "Walled Garden Setup Request sent");
+	}
+
+	free(msg);
+
+	// Set up the Block List
+	msg = safe_calloc(SMALL_BUF);
+
+	if (execute_ret_url_encoded(msg, STATUS_BUF - 1, "/usr/lib/opennds/libopennds.sh nftset insert blocklist reject") == 0) {
+		debug(LOG_INFO, "Block List Setup Request sent");
+	}
+
+	free(msg);
+
+	// Reload dnsmasq again for nftsets, but this time we can do it in the background
+	dnscmd = safe_calloc(STATUS_BUF);
+	safe_snprintf(dnscmd, STATUS_BUF, "/usr/lib/opennds/dnsconfig.sh \"reload_only\" &");
+	debug(LOG_DEBUG, "reload command [ %s ]", dnscmd);
+	if (system(dnscmd) == 0) {
+		debug(LOG_INFO, "Dnsmasq reloading");
+	} else {
+		debug(LOG_ERR, "Dnsmasq reload failed!");
+	}
+
+	free(dnscmd);
+
+
 }
 
 /**@internal
@@ -897,7 +940,9 @@ main_loop(int argc, char **argv)
 
 	debug(LOG_NOTICE, "openNDS is now running.\n");
 	safe_asprintf(&cmd, "/usr/lib/opennds/libopennds.sh \"auth_restore\" &");
-	system(cmd);
+	if (system(cmd) != 0) {
+		debug(LOG_ERR, "failure: %s", cmd);
+	}
 	free(cmd);
 
 	result = pthread_join(tid, NULL);

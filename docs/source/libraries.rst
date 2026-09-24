@@ -4,7 +4,20 @@ Library Utilities
 Overview
 ********
 
-A number of library utilities are included. These may be used by NDS itself, FAS and Preauth. These may in the future, be enhanced, have additional functionality added.
+A number of library utilities are included. These may be used by NDS itself, FAS and Preauth. These may from time to time, be enhanced and have additional functionality added.
+
+The `ndscfg` command is provided as a CLI wrapper for accessing many library calls, or the library scrips may be called directly.
+
+The `ndscfg` command suppports both commandline arguments and pipes.
+
+For example, to display the OpenNDS gateway route:
+
+``ndscfg gatewayroute``
+
+returns the gatewayroute string
+
+``online:192.168.4.1,eth1``
+
 
 By default, library utilities will be installed in the folder
 
@@ -17,7 +30,7 @@ get_client_interface.sh
 #######################
 This utility allows the interface a client is using to be determined from the client mac address.
 
-It can be used in PreAuth and local FAS scripts.
+It can be used in ThemeSpec and local FAS scripts.
 
 Its output is also sent to FAS in the encrypted query string as the variable "clientif"
 
@@ -397,6 +410,92 @@ configure_log_location
     arg1: configure_log_location, configure the log location
 
 Returns the directory into which log files should be stored and exit code 0 if successful
+
+is_nodog
+--------
+
+    arg1: is_nodog, check if nodogsplash is installed
+
+Returns string nodog_yes and exit code 0 if it is, nodog_no and exit code >0 if it is not
+
+generate_key
+------------
+
+    arg1: generate_key, generate a pseudo-random hexadecimal key value
+
+Returns the pseudo-random hexadecimal key value
+
+set_key
+-------
+
+    arg1: set_key, adds option faskey to config file
+
+    arg2: the key to set
+
+Returns exit code 0 always
+
+hash_str
+--------
+
+    arg1: generates a hash from the string supplied
+
+    arg2: the string to hash
+
+Returns the hashed string and exit code 0 if successful
+
+wget_request
+------------
+
+    arg1: wget_request, send a request to a remote fas url
+
+    arg2: The url we want to send the request to
+
+    arg3: The requested action
+
+    arg4: The gatewayhash of this router
+
+    arg5: The user agent to send to the remote fas
+
+    arg6: The payload to send to the fas
+
+Returns the reply to the request from the remote fas and exit code 0 if successful
+
+preemptivemac
+-------------
+
+    arg1: preemptivemac, parses the preemptivemac list and authenticates clients in that list
+
+    arg2: optional client mac address to immediately pre-emptively authenticate instead of parsing the list
+
+Returns exit code 0 always
+
+resolve_fqdn
+------------
+
+    arg1: resolve_fqdn, get the first ip address to resolve from a DNS query to the fqdn
+
+Returns the resolved ip address or an empty string and returns exit code 0 always
+
+config_input_fields
+-------------------
+
+    arg1: config_input_fields, configure custom input and hidden (passthrough) fields from fas_custom_variables_list
+
+Returns html code for custom inputs and custom passthrough. Returns exit code 0 always.
+
+get_meshnode_list
+-----------------
+
+    arg1: get_meshnode_list, get a list of known mesh11sd meshnodes
+
+Returns a list of meshnode mac addresses. Returns exit code 0 always.
+
+get_next_preemptive_auth
+------------------------
+
+    arg1: get_next_preemptive_auth, gets the auth string for the next client to reauthenticate after a restart. Deletes that clients record from the preemptive_auth database.
+
+Returns the auth string for the client. Returns exit code 0 always.
 
 ?fas:
 -----

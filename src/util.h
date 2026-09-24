@@ -21,7 +21,7 @@
 /** @file util.h
     @brief Misc utility functions
     @author Copyright (C) 2004 Philippe April <papril777@yahoo.com>
-    @author Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
+    @author Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
 */
 
 #ifndef _UTIL_H_
@@ -132,5 +132,10 @@ unsigned short rand16(void);
  * Total: 54 chars
  **/
 #define MAX_HOSTPORTLEN ( INET6_ADDRSTRLEN + sizeof("[]:65536")-1 )
+
+/*
+ * @brief Is the given semantic version outdated?
+ **/
+int semver_is_outdated(const char *version, const char *min_version);
 
 #endif /* _UTIL_H_ */

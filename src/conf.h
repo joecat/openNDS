@@ -22,15 +22,15 @@
     @brief Config file parsing
     @author Copyright (C) 2004 Philippe April <papril777@yahoo.com>
     @author Copyright (C) 2007 Paul Kube <nodogsplash@kokoro.ucsd.edu>
-    @author Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
+    @author Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
 */
 
-#define COPYRIGHT "openNDS, Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services"
+#define COPYRIGHT "openNDS, Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services"
 
 #ifndef _CONF_H_
 #define _CONF_H_
 
-#define VERSION "10.1.3"
+#define VERSION "11.0.0"
 
 /*
  * Defines how many times should we try detecting the interface with the default route (in seconds).
@@ -62,17 +62,18 @@
 #define DEFAULT_STATUSPATH "/usr/lib/opennds/client_params.sh"
 #define DEFAULT_LOG_MOUNTPOINT "/tmp"
 #define DEFAULT_MAX_PAGE_SIZE "10240"
-#define DEFAULT_FASPORT "0"
-#define DEFAULT_LOGIN_OPTION_ENABLED "0"
+#define DEFAULT_FASPORT "443"
+#define DEFAULT_LOGIN_OPTION_ENABLED "1"
 #define DEFAULT_MAX_LOG_ENTRIES "100"
 #define DEFAULT_USE_OUTDATED_MHD "0"
 #define DEFAULT_ALLOW_PREEMPTIVE_AUTHENTICATION "1"
 #define DEFAULT_FAS_SECURE_ENABLED "1"
 #define DEFAULT_FASPATH "/"
-#define DEFAULT_FASKEY "1234567890"
+#define DEFAULT_FASKEY ""
 #define DEFAULT_BINAUTH "/usr/lib/opennds/binauth_log.sh"
+#define DEFAULT_CUSTOMBINAUTH "/usr/lib/opennds/custombinauth.sh"
 #define DEFAULT_CHECKINTERVAL "15"
-#define DEFAULT_SESSION_TIMEOUT "1440"
+#define DEFAULT_SESSIONTIMEOUT "1440"
 #define DEFAULT_PREAUTH_IDLE_TIMEOUT "30"
 #define DEFAULT_AUTH_IDLE_TIMEOUT "120"
 #define DEFAULT_REMOTES_REFRESH_INTERVAL "0"
@@ -92,15 +93,19 @@
 #define DEFAULT_MAX_DOWNLOAD_BUCKET_SIZE "250" // Allows control over download rate limiting packet loss at the expense of increased latency
 #define DEFAULT_UPLOAD_QUOTA "0" // 0 means no limit
 #define DEFAULT_DOWNLOAD_QUOTA "0" // 0 means no limit
+#define DEFAULT_FUP_UPLOAD_THROTTLE_RATE "0" // 0 means BLOCK the client until deauthed
+#define DEFAULT_FUP_DOWNLOAD_THROTTLE_RATE "0" // 0 means BLOCK the client until deauthed
 #define DEFAULT_UPLOAD_UNRESTRICTED_BURSTING "0" // 0 means disabled, 1 means enabled
 #define DEFAULT_DOWNLOAD_UNRESTRICTED_BURSTING "0" // 0 means disabled, 1 means enabled
 #define DEFAULT_NDSCTL_SOCK "ndsctl.sock"
 #define DEFAULT_FW_MARK_AUTHENTICATED "0x30000"
+#define DEFAULT_FW_MARK_AUTH_BLOCKED "0x30001"
 #define DEFAULT_AUTHENTICATION_MARK "0x00030000"
 #define DEFAULT_FW_MARK_TRUSTED "0x20000"
 #define DEFAULT_THEMESPEC_PATH ""
 #define DEFAULT_FAS_REMOTEFQDN "disabled"
-#define DEFAULT_FAS_REMOTEIP ""
+#define DEFAULT_FAS_REMOTEIP "disabled"
+#define DEFAULT_FAS_SSL "wget"
 
 /* N.B.: default policies here must be ACCEPT, REJECT, or RETURN
  * In the .conf file, they must be allow, block, or passthrough
@@ -115,9 +120,10 @@
 
 // Default lists
 #define DEFAULT_TRUSTEDMACLIST ""
-#define DEFAULT_WALLEDGARDEN_FQDN_LIST ""
-#define DEFAULT_WALLEDGARDEN_PORT_LIST ""
 #define DEFAULT_FAS_CUSTOM_PARAMETERS_LIST ""
+#define DEFAULT_FAS_CUSTOM_VARIABLES_LIST ""
+#define DEFAULT_FAS_CUSTOM_IMAGES_LIST ""
+#define DEFAULT_FAS_CUSTOM_FILES_LIST ""
 #define DEFAULT_USERS_TO_ROUTER "allow%20udp%20port%2053 allow%20udp%20port%2067 allow%20tcp%20port%2022 allow%20tcp%20port%20443"
 #define DEFAULT_AUTHENTICATED_USERS "allow%20all"
 #define DEFAULT_PREAUTHENTICATED_USERS ""
@@ -229,7 +235,7 @@ typedef struct {
 	char *authdir;						//@brief Notional relative dir for authentication URL
 	char *denydir;						//@brief Notional relative dir for denial URL
 	char *preauthdir;					//@brief Notional relative dir for preauth URL
-	int session_timeout;					//@brief Minutes of the default session length
+	int sessiontimeout;					//@brief Minutes of the default session length
 	int preauth_idle_timeout;				//@brief Minutes a preauthenticated client will be kept in the system
 	int auth_idle_timeout;					//@brief Minutes an authenticated client will be kept in the system
 	int remotes_refresh_interval;				//@brief Minutes before remote files will be refreshed
@@ -246,13 +252,13 @@ typedef struct {
 	unsigned long long int max_download_bucket_size;	//@brief control download rate limiting packet loss at the expense of increased latency
 	unsigned long long int download_quota;			//@brief Download quota, kB
 	unsigned long long int upload_quota;			//@brief Upload quota, kB
+	unsigned long long int fup_download_throttle_rate;	//@brief Fair Useage Policy Download throttle rate, kb/s, activated when quota exceeded
+	unsigned long long int fup_upload_throttle_rate;	//@brief Fair Usage Policy Upload throttle rate, kb/s, activated when quota exceeded
 	int download_unrestricted_bursting;			//@brief Enable/disable unrestriced bursting
 	int upload_unrestricted_bursting;			//@brief Enable/disable unrestriced bursting
 	int syslog_facility;					//@brief facility to use when using syslog for logging
 	int macmechanism; 					//@brief mechanism wrt MAC addrs
 	t_MAC *trustedmaclist;					//@brief list of trusted macs
-	t_WGP *walledgarden_port_list;				//@brief list of Walled Garden Ports
-	t_WGFQDN *walledgarden_fqdn_list;			//@brief list of Walled Garden FQDNs
 	t_FASPARAM *fas_custom_parameters_list;			//@brief list of Custom FAS parameters
 	t_FASVAR *fas_custom_variables_list;			//@brief list of Custom FAS variables
 	t_FASIMG *fas_custom_images_list;			//@brief list of Custom FAS images
@@ -262,10 +268,12 @@ typedef struct {
 	char *custom_images;					//@brief FAS custom image string
 	char *custom_files;					//@brief FAS custom file string
 	unsigned int fw_mark_authenticated;			//@brief nftables mark for authenticated packets
+	unsigned int fw_mark_auth_blocked;			//@brief nftables mark for auth_blocked packets
 	char *authentication_mark;				//@brief Padded authentication mark
 	unsigned int fw_mark_trusted;				//@brief nftables mark for trusted packets
 	int ip6;						//@brief enable IPv6
 	char *binauth;						//@brief external postauthentication program
+	char *custombinauth;					//@brief external custom postauthentication program
 	char *preauth;						//@brief external preauthentication program
 	int lockfd;						//@brief ndsctl lockfile file descriptor
 } s_config;
@@ -276,8 +284,6 @@ s_config *config_get_config(void);
 // @brief Initialise the conf system
 void config_init(int argc, char **argv);
 void parse_trusted_mac_list(const char[]);
-void parse_walledgarden_fqdn_list(const char[]);
-void parse_walledgarden_port_list(const char[]);
 void parse_fas_custom_parameters_list(const char[]);
 void parse_fas_custom_variables_list(const char[]);
 void parse_fas_custom_images_list(const char[]);
@@ -307,3 +313,5 @@ int set_debuglevel(const char[]);
 } while (0)
 
 #endif // _CONF_H_
+
+char *set_list_str(char *list, const char *default_list, char *debug_level);

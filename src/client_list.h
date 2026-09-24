@@ -22,7 +22,7 @@
     @brief Client List functions
     @author Copyright (C) 2004 Alexandre Carmel-Veilleux <acv@acv.ca>
     @author Copyright (C) 2007 Paul Kube <nodogsplash@kokoro.ucsd.edu>
-    @author Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
+    @author Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
 */
 
 #ifndef _CLIENT_LIST_H_
@@ -55,6 +55,7 @@ typedef struct _t_client {
 	char *cid;					/**< @brief Client cid */
 	char *custom;					/**< @brief Client custom string sent from FAS and sent to BinAuth */
 	char *client_type;				/**< @brief Client type, cpd (cpd_can), rfc8910-cpi (cpi_url) or rfc8908-cpi (cpi_api)  */
+	char *cpi_query;				/**< @brief RFC8910-cpi query string  */
 	unsigned int fw_connection_state;		/**< @brief Client Connection state in the firewall */
 	time_t session_start;				/**< @brief Actual Time the client was authenticated */
 	time_t window_start;				/**< @brief Actual Time the client rate check window begins */
@@ -108,9 +109,6 @@ t_client *client_list_find_by_mac(const char mac[]); /* needed by ndsctl_thread.
 
 /** @brief Finds a client by its token */
 t_client *client_list_find_by_token(const char token[]);
-
-/** @brief Reset volatile client fields */
-void client_reset(t_client *client);
 
 /** @brief Deletes a client from the client list */
 void client_list_delete(t_client *client);

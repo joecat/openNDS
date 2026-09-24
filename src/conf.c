@@ -22,7 +22,7 @@
   @brief Config file parsing
   @author Copyright (C) 2004 Philippe April <papril777@yahoo.com>
   @author Copyright (C) 2007 Paul Kube <nodogsplash@kokoro.ucsd.edu>
-  @author Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
+  @author Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
  */
 
 #define _GNU_SOURCE
@@ -102,11 +102,8 @@ char *set_list_str(char *list, const char *default_list, char *debug_level)
 char *set_option_str(char *option, const char *default_option, char *debug_level)
 {
 	char msg[SMALL_BUF];
-	char debuglevel[STATUS_BUF];
 
 	memset(msg, 0, SMALL_BUF);
-	memset(debuglevel, 0, STATUS_BUF);
-
 	get_option_from_config(msg, SMALL_BUF, option);
 
 	if (strcmp(msg, "") == 0) {
@@ -150,7 +147,6 @@ config_init(int argc, char **argv)
 
 	safe_snprintf(libcmd, STATUS_BUF, "/usr/lib/opennds/libopennds.sh \"is_nodog\"");
 
-
 	if (execute_ret_url_encoded(msg, STATUS_BUF - 1, libcmd) == 0) {
 		debug(LOG_DEBUG, "NoDogSplash is installed, to continue please uninstall it and restart openNDS, exiting.....");
 		exit (1);
@@ -191,9 +187,8 @@ config_init(int argc, char **argv)
 
 	// Special handling for gatewayname as library call returns a url-encoded response
 	gatewayname_raw = safe_calloc(SMALL_BUF);
-	gatewayname = safe_calloc(SMALL_BUF);
-	gatewayname = safe_strdup(set_option_str("gatewayname", DEFAULT_GATEWAYNAME, debug_level));
-	uh_urldecode(gatewayname_raw, SMALL_BUF, gatewayname, SMALL_BUF);
+	gatewayname = set_option_str("gatewayname", DEFAULT_GATEWAYNAME, debug_level);
+	uh_urldecode(gatewayname_raw, SMALL_BUF, gatewayname, strlen(gatewayname));
 	config.gw_name = safe_strdup(gatewayname_raw);
 
 	openlog ("opennds", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_DAEMON);
@@ -203,23 +198,26 @@ config_init(int argc, char **argv)
 	free(gatewayname_raw);
 	//
 
-	config.gw_fqdn = safe_strdup(set_option_str("gatewayfqdn", DEFAULT_GATEWAYFQDN, debug_level));
-	config.status_path = safe_strdup(set_option_str("statuspath", DEFAULT_STATUSPATH, debug_level));
-	config.gw_interface = safe_strdup(set_option_str("gatewayinterface", DEFAULT_GATEWAYINTERFACE, debug_level));
-	config.gw_iprange = safe_strdup(set_option_str("gateway_iprange", DEFAULT_GATEWAY_IPRANGE, debug_level));
-	config.fas_key = safe_strdup(set_option_str("faskey", DEFAULT_FASKEY, debug_level));
-	config.log_mountpoint = safe_strdup(set_option_str("log_mountpoint", DEFAULT_LOG_MOUNTPOINT, debug_level));
-	config.webroot = safe_strdup(set_option_str("webroot", DEFAULT_WEBROOT, debug_level));
-	config.authdir = safe_strdup(set_option_str("authdir", DEFAULT_AUTHDIR, debug_level));
-	config.denydir = safe_strdup(set_option_str("denydir", DEFAULT_DENYDIR, debug_level));
-	config.preauthdir = safe_strdup(set_option_str("preauthdir", DEFAULT_PREAUTHDIR, debug_level));
-	config.ndsctl_sock = safe_strdup(set_option_str("ndsctl_sock", DEFAULT_NDSCTL_SOCK, debug_level));
-	config.authentication_mark = safe_strdup(set_option_str("authentication_mark", DEFAULT_AUTHENTICATION_MARK, debug_level));
-	config.binauth = safe_strdup(set_option_str("binauth", DEFAULT_BINAUTH, debug_level));
-	config.fas_path = safe_strdup(set_option_str("faspath", DEFAULT_FASPATH, debug_level));
-	config.themespec_path = safe_strdup(set_option_str("themespec_path", DEFAULT_THEMESPEC_PATH, debug_level));
-	config.fas_remoteip = safe_strdup(set_option_str("fasremoteip", DEFAULT_FAS_REMOTEIP, debug_level));
-	config.fas_remotefqdn = safe_strdup(set_option_str("fasremotefqdn", DEFAULT_FAS_REMOTEFQDN, debug_level));
+	config.gw_fqdn = set_option_str("gatewayfqdn", DEFAULT_GATEWAYFQDN, debug_level);
+	config.status_path = set_option_str("statuspath", DEFAULT_STATUSPATH, debug_level);
+	config.gw_interface = set_option_str("gatewayinterface", DEFAULT_GATEWAYINTERFACE, debug_level);
+	config.gw_iprange = set_option_str("gateway_iprange", DEFAULT_GATEWAY_IPRANGE, debug_level);
+	config.fas_key = set_option_str("faskey", DEFAULT_FASKEY, debug_level);
+	config.log_mountpoint = set_option_str("log_mountpoint", DEFAULT_LOG_MOUNTPOINT, debug_level);
+	config.webroot = set_option_str("webroot", DEFAULT_WEBROOT, debug_level);
+	config.authdir = set_option_str("authdir", DEFAULT_AUTHDIR, debug_level);
+	config.denydir = set_option_str("denydir", DEFAULT_DENYDIR, debug_level);
+	config.preauthdir = set_option_str("preauthdir", DEFAULT_PREAUTHDIR, debug_level);
+	config.ndsctl_sock = set_option_str("ndsctl_sock", DEFAULT_NDSCTL_SOCK, debug_level);
+	config.authentication_mark = set_option_str("authentication_mark", DEFAULT_AUTHENTICATION_MARK, debug_level);
+	// Setting binauth in config is deprecated. Use DEFAULT_BINAUTH only.
+	config.binauth = set_option_str("binauth_deprecated", DEFAULT_BINAUTH, "0");
+	config.custombinauth = set_option_str("custombinauth", DEFAULT_CUSTOMBINAUTH, debug_level);
+	config.fas_path = set_option_str("faspath", DEFAULT_FASPATH, debug_level);
+	config.themespec_path = set_option_str("themespec_path", DEFAULT_THEMESPEC_PATH, debug_level);
+	config.fas_remoteip = set_option_str("fasremoteip", DEFAULT_FAS_REMOTEIP, debug_level);
+	config.fas_remotefqdn = set_option_str("fasremotefqdn", DEFAULT_FAS_REMOTEFQDN, debug_level);
+	config.fas_ssl = set_option_str("fas_ssl", DEFAULT_FAS_SSL, debug_level);
 
 	/*
 	********** Integer config parameters **********
@@ -247,7 +245,7 @@ config_init(int argc, char **argv)
 	free(msg);
 	//
 
-	sscanf(set_option_str("sessiontimeout", DEFAULT_SESSION_TIMEOUT, debug_level), "%u", &config.session_timeout);
+	sscanf(set_option_str("sessiontimeout", DEFAULT_SESSIONTIMEOUT, debug_level), "%u", &config.sessiontimeout);
 	sscanf(set_option_str("preauthidletimeout", DEFAULT_PREAUTH_IDLE_TIMEOUT, debug_level), "%u", &config.preauth_idle_timeout);
 	sscanf(set_option_str("authidletimeout", DEFAULT_AUTH_IDLE_TIMEOUT, debug_level), "%u", &config.auth_idle_timeout);
 	sscanf(set_option_str("maxclients", DEFAULT_MAXCLIENTS, debug_level), "%u", &config.maxclients);
@@ -274,18 +272,20 @@ config_init(int argc, char **argv)
 	sscanf(set_option_str("upload_unrestricted_bursting", DEFAULT_UPLOAD_UNRESTRICTED_BURSTING, debug_level), "%u", &config.upload_unrestricted_bursting);
 	sscanf(set_option_str("uploadquota", DEFAULT_UPLOAD_QUOTA, debug_level), "%llu", &config.upload_quota);
 	sscanf(set_option_str("downloadquota", DEFAULT_DOWNLOAD_QUOTA, debug_level), "%llu", &config.download_quota);
+	sscanf(set_option_str("fup_upload_throttle_rate", DEFAULT_FUP_UPLOAD_THROTTLE_RATE, debug_level), "%llu", &config.fup_upload_throttle_rate);
+	sscanf(set_option_str("fup_download_throttle_rate", DEFAULT_FUP_DOWNLOAD_THROTTLE_RATE, debug_level), "%llu", &config.fup_download_throttle_rate);
 	sscanf(set_option_str("fw_mark_authenticated", DEFAULT_FW_MARK_AUTHENTICATED, debug_level), "%x", &config.fw_mark_authenticated);
+	sscanf(set_option_str("fw_mark_auth_blocked", DEFAULT_FW_MARK_AUTH_BLOCKED, debug_level), "%x", &config.fw_mark_auth_blocked);
 	sscanf(set_option_str("fw_mark_trusted", DEFAULT_FW_MARK_TRUSTED, debug_level), "%x", &config.fw_mark_trusted);
-/*
-	config.ip6 = DEFAULT_IP6;
-*/
+
+	// config.ip6 = DEFAULT_IP6;
+
 	// Parameters kept in config but have no default or config value
 	config.gw_address = NULL;
 	config.gw_ip = NULL;
 	config.http_encoded_gw_name = NULL;
 	config.url_encoded_gw_name = NULL;
 	config.fas_url = NULL;
-	config.fas_ssl = NULL;
 	config.fas_hid = NULL;
 	config.custom_params = NULL;
 	config.custom_vars = NULL;
@@ -298,9 +298,9 @@ config_init(int argc, char **argv)
 
 	// Lists
 	parse_trusted_mac_list(set_list_str("trustedmac", DEFAULT_TRUSTEDMACLIST, debug_level));
-	parse_walledgarden_fqdn_list(set_list_str("walledgarden_fqdn_list", DEFAULT_WALLEDGARDEN_FQDN_LIST, debug_level));
-	parse_walledgarden_port_list(set_list_str("walledgarden_port_list", DEFAULT_WALLEDGARDEN_PORT_LIST, debug_level));
 	parse_fas_custom_parameters_list(set_list_str("fas_custom_parameters_list", DEFAULT_FAS_CUSTOM_PARAMETERS_LIST, debug_level));
+	parse_fas_custom_images_list(set_list_str("fas_custom_images_list", DEFAULT_FAS_CUSTOM_IMAGES_LIST, debug_level));
+	parse_fas_custom_files_list(set_list_str("fas_custom_files_list", DEFAULT_FAS_CUSTOM_FILES_LIST, debug_level));
 
 	// Before we do anything else, reset the firewall (cleans it, in case we are restarting or after an opennds crash)
 	iptables_fw_destroy();
@@ -343,13 +343,6 @@ config_init(int argc, char **argv)
 
 	debug(LOG_NOTICE, "Interface %s is at %s (%s)", config.gw_interface, config.gw_ip, config.gw_mac);
 
-	// Make sure fas_remoteip is set. Note: This does not enable FAS.
-	if (strcmp(config.fas_remoteip, "") == 0) {
-		config.fas_remoteip = safe_strdup(config.gw_ip);
-	}
-
-	debug(LOG_DEBUG, "FAS remote ip address is [ %s ]", config.fas_remoteip);
-
 	// Generate a unique faskey if not set in config
 	if (strcmp(config.fas_key, DEFAULT_FASKEY) == 0) {
 		setupcmd = safe_calloc(STATUS_BUF);
@@ -374,19 +367,6 @@ config_init(int argc, char **argv)
 		free(setupcmd);
 		free(msg);
 	}
-
-	// Now initialize the firewall
-	if (iptables_fw_init() != 0) {
-		debug(LOG_ERR, "Error initializing firewall rules! Cleaning up");
-		iptables_fw_destroy();
-		debug(LOG_ERR, "Exiting because of error initializing firewall rules");
-		exit(1);
-	}
-
-	// Add rulesets
-	create_client_ruleset ("users_to_router", set_list_str("users_to_router", DEFAULT_USERS_TO_ROUTER, debug_level));
-	create_client_ruleset ("preauthenticated_users", set_list_str("preauthenticated_users", DEFAULT_PREAUTHENTICATED_USERS, debug_level));
-	create_client_ruleset ("authenticated_users", set_list_str("authenticated_users", DEFAULT_AUTHENTICATED_USERS, debug_level));
 
 	// Clean up any old database files and set some needed parameters
 	libcmd = safe_calloc(STATUS_BUF);
@@ -427,51 +407,6 @@ int check_ip_format(const char *possibleip)
 int check_mac_format(const char possiblemac[])
 {
 	return ether_aton(possiblemac) != NULL;
-}
-
-int add_to_walledgarden_fqdn_list(const char possiblefqdn[])
-{
-	char fqdn[128];
-	t_WGFQDN *p = NULL;
-	char possiblefqdn_urlencoded[256] = {0};
-
-	memset(fqdn, 0, sizeof(fqdn));
-	memset(possiblefqdn_urlencoded, 0, sizeof(possiblefqdn_urlencoded));
-
-	// Sanitise FQDN
-	uh_urlencode(possiblefqdn_urlencoded, sizeof(possiblefqdn_urlencoded), possiblefqdn, strlen(possiblefqdn));
-	debug(LOG_DEBUG, "[%s] is the urlencoded FQDN", possiblefqdn_urlencoded);
-
-	if (strcmp(possiblefqdn_urlencoded, possiblefqdn) == 0) {
-
-		sscanf(possiblefqdn, "%s", fqdn);
-
-		// Add FQDN to head of list
-		p = safe_calloc(sizeof(t_WGFQDN));
-		p->wgfqdn = safe_strdup(fqdn);
-		p->next = config.walledgarden_fqdn_list;
-		config.walledgarden_fqdn_list = p;
-		debug(LOG_INFO, "Added Walled Garden FQDN [%s] to list", possiblefqdn);
-	} else {
-		debug(LOG_WARNING, "Invalid FQDN [%s], please remove from the list; skipping..", possiblefqdn);
-	}
-	return 0;
-}
-
-int add_to_walledgarden_port_list(const char possibleport[])
-{
-	unsigned short int port;
-	t_WGP *p = NULL;
-
-	sscanf(possibleport, "%hu", &port);
-
-	// Add walled garden port to head of list
-	p = safe_calloc(sizeof(t_WGP));
-	p->wgport = port;
-	p->next = config.walledgarden_port_list;
-	config.walledgarden_port_list = p;
-	debug(LOG_INFO, "Added Walled Garden port [%hu] to list", port);
-	return 0;
 }
 
 int add_to_fas_custom_parameters_list(const char possibleparam[])
@@ -635,6 +570,7 @@ void parse_trusted_mac_list(const char ptr[])
 		}
 	}
 
+	free(ptrcopy);
 	free(ptrcopyptr);
 }
 
@@ -653,52 +589,6 @@ int is_trusted_mac(const char *mac)
 	}
 
 	return 0;
-}
-
-/* Given a pointer to a comma or whitespace delimited sequence of
- * Walled Garden FQDNs, add each FQDN to config.walledgardenfqdnlist
- */
-void parse_walledgarden_fqdn_list(const char ptr[])
-{
-	char *ptrcopy = NULL;
-	char *ptrcopyptr;
-	char *possiblefqdn = NULL;
-
-	// strsep modifies original, so let's make a copy
-	ptrcopyptr = ptrcopy = safe_strdup(ptr);
-
-	while ((possiblefqdn = strsep(&ptrcopy, ", \t"))) {
-		if (strlen(possiblefqdn) > 0) {
-			if (add_to_walledgarden_fqdn_list(possiblefqdn) < 0) {
-				exit(1);
-			}
-		}
-	}
-
-	free(ptrcopyptr);
-}
-
-/* Given a pointer to a comma or whitespace delimited sequence of
- * Walled Garden FQDN ports, add each port number to config.walledgardenportlist
- */
-void parse_walledgarden_port_list(const char ptr[])
-{
-	char *ptrcopy = NULL;
-	char *ptrcopyptr;
-	char *possibleport = NULL;
-
-	// strsep modifies original, so let's make a copy
-	ptrcopyptr = ptrcopy = safe_strdup(ptr);
-
-	while ((possibleport = strsep(&ptrcopy, ", \t"))) {
-		if (strlen(possibleport) > 0) {
-			if (add_to_walledgarden_port_list(possibleport) < 0) {
-				exit(1);
-			}
-		}
-	}
-
-	free(ptrcopyptr);
 }
 
 /* Given a pointer to a comma or whitespace delimited sequence of

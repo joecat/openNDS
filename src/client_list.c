@@ -22,7 +22,7 @@
   @brief Client List Functions
   @author Copyright (C) 2004 Alexandre Carmel-Veillex <acv@acv.ca>
   @author Copyright (C) 2007 Paul Kube <nodogsplash@kokoro.ucsd.edu>
-  @author Copyright (C) 2015-2023 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
+  @author Copyright (C) 2015-2026 Modifications and additions by BlueWave Projects and Services <opennds@blue-wave.net>
  */
 
 #define _GNU_SOURCE
@@ -95,6 +95,7 @@ client_list_init(void)
 static t_client *
 _client_list_append(const char mac[], const char ip[])
 {
+	char *hash;
 	t_client *client, *prevclient;
 	s_config *config;
 
@@ -116,9 +117,15 @@ _client_list_append(const char mac[], const char ip[])
 
 	client->mac = safe_strdup(mac);
 	client->ip = safe_strdup(ip);
+	client->counters.last_updated = time(NULL);
 
-	// Reset volatile fields and create new token
-	client_reset(client);
+	// Create new token and hid
+	hash = safe_calloc(STATUS_BUF);
+	client->token = safe_calloc(STATUS_BUF);
+	safe_snprintf(client->token, STATUS_BUF, "%04hx%04hx", rand16(), rand16());
+	hash_str(hash, STATUS_BUF, client->token);
+	client->hid = safe_strdup(hash);
+	free(hash);
 
 	// Trusted client does not trigger the splash page.
 	if (is_trusted_mac(mac)) {
@@ -146,54 +153,6 @@ _client_list_append(const char mac[], const char ip[])
 	return client;
 }
 
-/** @internal
- *  Reset volatile fields
- */
-void client_reset(t_client *client)
-{
-	char *hash;
-	char *msg;
-	char *cidinfo;
-
-	debug(LOG_DEBUG, "Resetting client [%s]", client->mac);
-	// Reset traffic counters
-	client->counters.incoming = 0;
-	client->counters.outgoing = 0;
-	client->counters.last_updated = time(NULL);
-
-	// Reset session time
-	client->session_start = 0;
-	client->session_end = 0;
-
-	// Reset token and hid
-	hash = safe_calloc(STATUS_BUF);
-	client->token = safe_calloc(STATUS_BUF);
-	safe_snprintf(client->token, STATUS_BUF, "%04hx%04hx", rand16(), rand16());
-	hash_str(hash, STATUS_BUF, client->token);
-	client->hid = safe_strdup(hash);
-	free(hash);
-
-	// Reset custom and client_type
-	client->custom = safe_calloc(MID_BUF);
-	client->client_type = safe_calloc(STATUS_BUF);
-
-	//Reset cid and remove cidfile using rmcid
-	if (client->cid) {
-
-		if (strlen(client->cid) > 0) {
-			msg = safe_calloc(SMALL_BUF);
-			cidinfo = safe_calloc(MID_BUF);
-			safe_snprintf(cidinfo, MID_BUF, "cid=\"%s\"", client->cid);
-			write_client_info(msg, SMALL_BUF, "rmcid", client->cid, cidinfo);
-			free(msg);
-			free(cidinfo);
-		}
-
-		client->cid = safe_calloc(SMALL_BUF);
-	}
-
-}
-
 /**
  *  Given an IP address, add a client corresponding to that IP to client list.
  *  Return a pointer to the new client list entry, or to an existing entry
@@ -210,7 +169,7 @@ client_list_add_client(const char mac[], const char ip[])
 	char *msg;
 
 	if (!check_mac_format(mac)) {
-		// Inappropriate format in IP address
+		// Inappropriate format in MAC address
 		debug(LOG_NOTICE, "Illegal MAC format [%s]", mac);
 		return NULL;
 	}
@@ -415,6 +374,8 @@ _client_list_free_node(t_client *client)
 	char *msg;
 	char *cidinfo;
 
+	debug(LOG_DEBUG, "Freeing client node [ %lu ] [ %s ]", client, client->mac);
+
 	if (client->cid) {
 
 		// Remove any existing cidfile:
@@ -428,6 +389,19 @@ _client_list_free_node(t_client *client)
 		}
 	}
 
+	free(client->ip);
+	free(client->mac);
+	free(client->token);
+	free(client->hid);
+	free(client->cid);
+	free(client->custom);
+	free(client->client_type);
+
+	if (client->cpi_query) {
+		free(client->cpi_query);
+	}
+
+	debug(LOG_DEBUG, "Client node [ %lu ] freed", client);
 	free(client);
 }
 

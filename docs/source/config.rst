@@ -169,9 +169,9 @@ Default: None
 
 Required when when login_option_enabled is set to '3'
 
-Note: /usr/lib/opennds/theme_click-to-continue.sh is used for login_option_enabled '1'
+Note: /usr/lib/opennds/theme_click-to-continue-basic.sh is used for login_option_enabled '1'
 
-and:  /usr/lib/opennds/theme_user_email_login.sh is used for login_option_enabled '2'
+and:  /usr/lib/opennds/theme_user-email-login-basic.sh is used for login_option_enabled '2'
 
 Sets the ThemeSpec file path to be used when login_option_enabled '3'
 
@@ -183,6 +183,16 @@ The file must be flagged as executable and have the correct shebang for the defa
 
 ``option themespec_path '/usr/lib/opennds/<filename>'``
 
+DHCP Leases File
+****************
+
+Default: Try /tmp/dhcp.leases, /var/lib/misc/dnsmasq.lease or /var/db/dnsmasq.leases
+
+The file containing the list of active DHCP leases.
+
+Example:
+
+``option dhcp_leases_file '/tmp/dhcp.leases.special'``
 
 Define Custom Parameters
 ************************
@@ -548,6 +558,24 @@ Example:
 
 ``option maxclients '500'``
 
+Set Fast Client Scan
+********************
+
+Default 1 (enabled)
+
+Enables fast client scanning to find the interface used by the client.
+
+Fast scanning skips search for actual wireless interface used.
+
+Any scan delay effects the display rewrite speed of the splash page sequence.
+
+Useful when a large mesh or other extended network is in use.
+
+Otherwise the Client Scan could, for large networks, take many seconds to complete.
+
+For example, to enable:
+``option fast_client_scan '0'``
+
 Client timeouts in minutes
 **************************
 
@@ -753,23 +781,38 @@ Example: Disable all rate quotas for all clients, overriding settings made in FA
 Set Volume Quotas
 *****************
 
-Defaults 0
-
-Integer values only.
-
-Values are in kB.
-
-If set to 0, there is no limit.
-
-If the client data quota exceeds the value set here, the client will be deauthenticated.
+If the client data quota exceeds the value set here, the client will be deauthenticated or rate limited as defined by the Fair Usage Policy throttle rate.
 
 The client by default may re-authenticate. It is the responsibility of the FAS (whether Themespec, other local or remote) to restrict further authentication of the client if so desired.
 
-Example:
+Defaults 0
 
-``option uploadquota '1000'``
+Integer values only
 
-``option downloadquota '10000'``
+Values are in kB
+
+If set to 0, there is no limit
+
+``option uploadquota '0'``
+
+``option downloadquota '0'``
+
+Set Fair Usage Policy Throttle Rate
+***********************************
+
+If Volume quota is set, a download throttle rate can be configured.
+
+Defaults 0
+
+Integer values only
+
+Values are in kb/s
+
+If set to 0, the client will be deauthenticated when the volume quota is exceeded
+
+``option fup_upload_throttle_rate '0'``
+
+``option fup_download_throttle_rate '0'``
 
 
 Enable BinAuth Support.
@@ -987,30 +1030,18 @@ Example:
 
 ``option nat_traversal_poll_interval '5'``
 
-Set PreAuth
-***********
-
-Default Not set, or automatically set by "option login_option_enabled".
-
-PreAuth support allows FAS to call a local program or script with html served by the built in NDS web server.
-
-If the option is set, it points to a program/script that is called by the NDS FAS handler.
-
-All other FAS settings will be overidden.
-
-Example:
-
-``option preauth '/path/to/myscript/myscript.sh'``
-
 Access Control For Authenticated Users
 **************************************
 
-Grant Access For Authenticated Users (allow)
+* Access can be allowed by openNDS but the final decision will be passed on to the operating system firewall. (Note: passthrough is deprecated as in nftables "allow" is equivalent to the old "passthrough"
+* All listed rules will be applied in the order present in the list.
+* An ip address or an FQDN may be included in a list entry.
+* If an FQDN resolves to multiple ip addresses, the rule will **NOT** be added. Rules for such FQDNs must be added elsewhere (eg the operating system firewall)
+
+Allow Access for Authenticated Users (allow)
 --------------------------------------------
 
-* Access can be allowed by openNDS but the final decision will be passed on to the operating system firewall. (Note: passthrough is deprecated as in nftables "allow" is equivalent to the old "passthrough"
-
-Any entries set here, or below in Block Access, will override the default
+Any entries set here, or below in Block Access, are in addition to the default policy of "allow all"
 
 Default:
 
@@ -1028,28 +1059,75 @@ Grant access to udp services at address 123.1.1.1, on port 5000.
 
  ``list authenticated_users 'allow udp port 5000 to 123.1.1.1'``
 
-Block Access For Authenticated Users (block)
---------------------------------------------
+Block Access For Authenticated Users (Block Lists)
+--------------------------------------------------
 
-Default: None
+Deny authenticated users access to external services
 
-All block access items must follow "allow" items (see above) as any entries set here will override the access default.
+A Block List can be configured either:
+    1. Manually for known ip addresses or fqdns with single ip addresses
+    2. Autonomously from a list of FQDNs and ports
 
-Examples:
+Manual Block List configuration
+...............................
 
- You might want to block entire IP subnets. e.g.:
+This requires research to determine the ip addresses of the Block List site(s) and can be problematic as sites can use many dynamic ip addresses.
 
- ``list authenticated_users 'block to 123.2.3.0/24'``
+However, manual configuration does not require any additional dependencies (ie additional installed packages).
 
- ``list authenticated_users 'block to 123.2.0.0/16'``
+Manual configuration example:
 
- ``list authenticated_users 'block to 123.0.0.0/8'``
+``list authenticated_users 'block udp port 8020 to 112.122.123.124'``
 
-or block access to a single IP address. e.g.:
+An fqdn can be used in place of an ip address (but the fqdn must have only one possible ip address)
 
- ``list authenticated_users 'block to 123.2.3.4'``
+``list authenticated_users 'block tcp port 443 to mywebsite.com'``
 
-Do not forget to add an allow if the default only is assumed (see above)
+Autonomous Blocklist configuration using a list of FQDNs and Ports
+..................................................................
+
+This has the advantage of discovering all ip addresses used by the Blocklist sites.
+
+But it does require the dnsmasq-full package (and also the ipset package if dnsmasq does not support nftsets) to be installed.
+
+Configuration is then a simple matter of adding two lists as follows:
+
+``list blocklist_fqdn_list 'fqdn1 fqdn2 fqdn3 .... fqdnN'``
+
+``list blocklist_port_list 'port1 port2 port3 .... portN'``
+
+or
+
+``list blocklist_fqdn_list 'fqdn1'``
+
+``list blocklist_fqdn_list 'fqdn2'``
+
+``list blocklist_fqdn_list '....... etc.``
+
+``list blocklist_fqdn_list 'fqdnN'``
+
+Similarly, ports can be listed on multiple lines
+
+.. Note:: If blocklist_port_list is NOT specified, then blocklist access is denied for all protocols (tcp, udp, icmp) on ALL ports for each fqdn specified in blocklist_fqdn_list.
+
+If blocklist_port_list IS specified, then:
+
+    1. Specified port numbers apply to ALL FQDN's specified in blocklist_fqdn_list.
+    2. Access is blocked only for specified ports in each blocklist fqdn.
+    3. Blocklist only applies to authenticated users.
+
+
+Autonomous configuration examples
+.................................
+
+    1. To add Facebook to the blocklist, the list entries would be:
+        ``list blocklist_fqdn_list 'facebook.com fbcdn.net'``
+
+    2. To add YouTube to the blocklist, the list entries would be:
+        ``list blocklist_fqdn_list 'youtube.com'``
+
+    3. To deny access only to a port or list of ports, allowing other ports:
+        ``list blocklist_port_list '443 80'``
 
 Access Control For Preauthenticated Users:
 ******************************************
@@ -1098,11 +1176,11 @@ Autonomous Walled Garden configuration is activated using a list of FQDNs and Po
 
 This has the advantage of discovering all ip addresses used by the Walled Garden sites.
 
-But it does require the ipset and dnsmasq-full packages to be installed by running the following commands (on OpenWrt):
+But it does require the dnsmasq-full package to be installed and on OpenWrt 22.03.x or earlier the ipset package is also required. This is achieved by running the following commands (on OpenWrt):
 
 ``opkg update``
 
-``opkg install ipset``
+``opkg install ipset`` (OpenWrt version 22.03.x or earlier)
 
 ``opkg remove dnsmasq``
 
@@ -1198,43 +1276,56 @@ For example - Allow ports for SSH/Telnet/HTTP/HTTPS:
 
 ``list users_to_router 'allow tcp port 443'``
 
-MAC Address Access Control List
-*******************************
-
-A list of MAC addresses can be defined that are either allowed to use the system, or are blocked.
-
-Note: This can easily be bypassed as a client MAC address can usually be easily changed.
-
-The mechanism used is either 'allow' or 'block' (It cannot be both).
-
-Examples:
-
-``option macmechanism 'allow'``
-
-``list allowedmac '00:00:C0:01:D0:0D'``
-
-``list allowedmac '00:00:C0:01:D0:1D'``
-
-or
-
-``option macmechanism 'block'``
-
-``list blockedmac '00:00:C0:01:D0:2D'``
-
-
 Trusted Clients
 ***************
 
-A list of the MAC addresses of client devices that do not require authentication can be defined.
+A list of the MAC addresses of trusted client devices.
+
+Trusted clients are granted immediate and unconditional access and do not require authentication.
+
+Trusted client data usage is not recorded and no quotas or timeouts are applied.
+
+See "Pre-emptive Clients" for conditional access for "trusted" clients.
 
 .. note::
- This can easily be be used to allow unauthorised access as a client MAC address can be changed. For a potentially more secure alternative, see "option allow_preemptive_authentication"
+ Be aware that most mobile devices randomise their mac address for each wireless network encountered.
 
 Example:
 
 ``list trustedmac '00:00:C0:01:D0:0D'``
 
 ``list trustedmac '00:00:C0:01:D0:1D'``
+
+Pre-emptive Clients
+*******************
+
+A list of the MAC addresses and access conditions of pre-emptively authenticated client devices.
+
+Unlike Trusted Clients, Pre-emptive clients have their data usage monitored. Quotas and timeouts are applied.
+
+Pre-emptive clients are logged both locally and in remote fas servers in the same way as normal validated clients.
+
+Pre-emptive Authentication must be enabled (default). See "allow_preemptive_authentication".
+
+  Default: Not Set
+
+.. note::
+ Be aware that most mobile devices randomise their mac address for each wireless network encountered.
+
+List parameters will be mac, sessiontimeout, uploadrate, downloadrate, uploadquota, downloadquota and custom. The ";" character is used as a parameter separator.
+
+List parameters set to "0" or omitted are set to the global or default value.
+
+Pre-emptive clients are logged both locally and in remote fas servers in the same way as normal validated clients.
+
+Examples:
+
+``list preemptivemac 'mac=00:00:C0:01:D0:01;sessiontimeout=1200;uploadrate=200;downloadrate=0;uploadquota=0;downloadquota=0;custom=custom string for preemptivemac1'``
+
+``list preemptivemac 'mac=00:00:D0:01:D0:02;sessiontimeout=1000;uploadrate=200;downloadrate=800;uploadquota=0;downloadquota=0;custom=custom string for preemptivemac2'``
+
+``list preemptivemac 'mac=00:00:E0:01:D0:03;sessiontimeout=4200;uploadrate=100;downloadrate=0;uploadquota=0;downloadquota=0;custom=custom_string_for_preemptivemac3'``
+
 
 Dhcp option 114 Enable - RFC8910
 ********************************
@@ -1254,7 +1345,7 @@ Example:
 Packet Marking Compatibility
 ****************************
 
-openNDS uses specific HEXADECIMAL values to mark packets used by iptables as a bitwise mask.
+openNDS uses specific HEXADECIMAL values to mark packets used by nftables as a bitwise mask.
 
 This mask can conflict with the requirements of other packages.
 
@@ -1272,8 +1363,8 @@ Option: fw_mark_trusted
 
 Default: 20000 (0010|0000|0000|0000|0000 binary)
 
-Option: fw_mark_blocked
------------------------
+Option: fw_mark_blocked (deprecated)
+------------------------------------
 
 Default: 10000 (0001|0000|0000|0000|0000 binary)
 

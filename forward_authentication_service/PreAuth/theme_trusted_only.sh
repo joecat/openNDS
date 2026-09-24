@@ -1,91 +1,103 @@
 #!/bin/sh
 #Copyright (C) The openNDS Contributors 2004-2022
-#Copyright (C) BlueWave Projects and Services 2015-2024
+#Copyright (C) BlueWave Projects and Services 2015-2026
 #This software is released under the GNU GPL license.
 #
 # Warning - shebang sh is for compatibliity with busybox ash (eg on OpenWrt)
-# This should be changed to bash for generic Linux
+# This is changed to bash automatically by Makefile for generic Linux
 #
 
 # Title of this theme:
-title="theme_click-to-continue-legacy"
-
-# Description:
-# This theme allows the legacy splash.html splash page to be used
+title="theme_trusted_only"
 
 # functions:
 
 generate_splash_sequence() {
-	click_to_continue
+	landing_page
 }
 
 header() {
-# Define a dummy header return code for libopennds
-	type header &>/dev/null
+# Define a common header html for every page served
+	gatewayurl=$(printf "${gatewayurl//%/\\x}")
+	echo "<!DOCTYPE html>
+		<html>
+		<head>
+		<meta http-equiv=\"Cache-Control\" content=\"no-cache, no-store, must-revalidate\">
+		<meta http-equiv=\"Pragma\" content=\"no-cache\">
+		<meta http-equiv=\"Expires\" content=\"0\">
+		<meta charset=\"utf-8\">
+		<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+		<link rel=\"shortcut icon\" href=\"$gatewayurl/images/splash.jpg\" type=\"image/x-icon\">
+		<link rel=\"stylesheet\" type=\"text/css\" href=\"$gatewayurl/splash.css\">
+		<title>$gatewayname</title>
+		</head>
+		<body>
+		<div class=\"offset\">
+		<med-blue>
+			$gatewayname <br>
+		</med-blue>
+		<div class=\"insert\" style=\"max-width:100%;\">
+	"
 }
 
-click_to_continue() {
-	# This ThemeSpec imports a legacy splash.html file for a simple click to continue splash page with no client validation.
-	# The client is NOT required to accept a terms of service statement and does not receive any indication of a privacy policy.
-	#
-	# Warning:
-	# Use of this ThemeSpec may make you personally liable for misuse of the Internet connection and may not comply with your country or state regulations.
-	# Use at your own risk at public venues.
-	#
-	# The legacy splash.html file can be stored anywhere that this script can access.
-	# Traditionally it was stored in /etc/opennds/htdocs, so make sure you set the variable "legacy" to match the location.
-	legacy="/etc/opennds/htdocs/splash.html"
-	legacysplash=$mountpoint/ndscids/$hid.html
+footer() {
+	# Define a common footer html for every page served
+	year=$(date +'%Y')
+	echo "
+		<hr>
+		<div style=\"font-size:0.5em;\">
+			<br>
+			<img style=\"height:60px; float:left;\" src=\"$gatewayurl""$imagepath\" alt=\"Splash Page: For access to the Internet.\">
+			&copy; Portal: BlueWave Projects and Services 2015 - $year<br>
+			<br>
+			Portal Version: $version
+			<br><br><br><br>
+		</div>
+		</div>
+		</div>
+		</body>
+		</html>
+	"
 
-	if [ -e "$legacy" ]; then
-		cp $legacy $legacysplash
+	exit 0
+}
 
-		get_option_from_config gatewayport
+landing_page() {
+	originurl=$(printf "${originurl//%/\\x}")
+	gatewayurl=$(printf "${gatewayurl//%/\\x}")
 
-		if [ -z "$gatewayport"]; then
-			gatewayport="2050"
-		fi
+	configure_log_location
+	. $mountpoint/ndscids/ndsinfo
 
-		sedstr="s|\$gatewayname|$gatewayname|"
-		sed -i "$sedstr" "$legacysplash"
+	# Trusted users only so never authenticate
+	loginfo="$userinfo, status=$authstat, mac=$clientmac, ip=$clientip, client_type=$client_type, cpi_query=$cpi_query, zone=$client_zone, ua=$user_agent"
+	write_log
 
-		htmlentitydecode $gatewayurl
-		gatewayurl=$entitydecoded
-		authaction="$gatewayurl/opennds_auth/"
-		sedstr="s|\$authaction|$authaction|"
-		sed -i "$sedstr" "$legacysplash"
 
-		css_rel="\"/splash.css\""
-		css_abs="\"$gatewayurl/splash.css\""
-		sedstr="s|$css_rel|$css_abs|"
-		sed -i "$sedstr" "$legacysplash"
+	# output the landing page - no authentication
 
-		img_rel="\"/images/splash.jpg\""
-		img_abs="\"$gatewayurl/images/splash.jpg\""
-		sedstr="s|$img_rel|$img_abs|"
-		sed -i "$sedstr" "$legacysplash"
+	auth_fail="
+		<p>
+			<big-red>
+				Access Denied
+			</big-red>
+			<hr>
+		</p>
 
-		option="gatewayfqdn"
-		get_option_from_config
+		<p>
+			<italic-black>
+				You are not authorised to access the Internet on this network
+			</italic-black>
+		</p>
+		<p>
+			<br>
+		</p>
+		<hr>
+	"
 
-		if [ -z "$gatewayfqdn" ]; then
-			gatewayfqdn="status.client"
-		fi
 
-		redir="http://$gatewayfqdn"
-		sedstr="s|\$redir|$redir|"
-		sed -i "$sedstr" "$legacysplash"
-
-		tok=$(printf "$hid$key" | sha256sum | awk -F' ' '{printf $1}')
-		sedstr="s|\$tok|$tok|"
-		sed -i "$sedstr" "$legacysplash"
-
-		cat "$legacysplash"
-		rm "$legacysplash"
-		exit 0
-	else
-		exit 1
-	fi
+	echo "$auth_fail"
+	footer
 }
 
 #### end of functions ####
@@ -99,6 +111,9 @@ click_to_continue() {
 #  set in libopennds.sh			#
 #						#
 #################################################
+
+
+randquery="$(date | sha256sum | awk '{printf "%s", $1}')"
 
 # Quotas and Data Rates
 #########################################

@@ -1,5 +1,5 @@
 #!/bin/sh
-#Copyright (C) BlueWave Projects and Services 2015-2023
+#Copyright (C) BlueWave Projects and Services 2015-2026
 #This software is released under the GNU GPL license.
 
 # functions:
@@ -11,16 +11,23 @@ get_option_from_config() {
 
 # Function to send commands to openNDS:
 do_ndsctl () {
-	local timeout=4
+	local timeout=15
 
 	for tic in $(seq $timeout); do
 		ndsstatus="ready"
+		ndsctlcmd="$ndsctlcmd 2>&1"
 		ndsctlout=$(eval ndsctl "$ndsctlcmd")
 
 		for keyword in $ndsctlout; do
 
 			if [ $keyword = "locked" ]; then
 				ndsstatus="busy"
+				sleep 1
+				break
+			fi
+
+			if [ $keyword = "probably" ]; then
+				ndsstatus="not_started"
 				sleep 1
 				break
 			fi
@@ -47,6 +54,10 @@ do_ndsctl () {
 
 		if [ "$ndsstatus" = "ready" ]; then
 			break
+		fi
+
+		if [ "$ndsstatus" = "not_started" ]; then
+			continue
 		fi
 	done
 }
@@ -87,7 +98,13 @@ ndspid=$(pgrep -f '/usr/lib/opennds/authmon.sh')
 #get arguments and set variables
 url=$1
 gatewayhash=$2
-phpcli=$3
+remotecli=$3
+
+if [ "$remotecli" = "wget" ]; then
+	remoterequest="/usr/lib/opennds/libopennds.sh \"wget_request\""
+else
+	remoterequest="$remotecli -f /usr/lib/opennds/post-request.php"
+fi
 
 option="nat_traversal_poll_interval"
 get_option_from_config
@@ -97,42 +114,32 @@ if [ "$loop_interval" = "" ] || [ "$loop_interval" -le 0 ] || [ "$loop_interval"
 	loop_interval=5
 fi
 
-postrequest="/usr/lib/opennds/post-request.php"
-
-# Save startup arguments for libopennds
-echo "url=$1" > $mountpoint/ndscids/authmonargs
-echo "gatewayhash=$2" >> $mountpoint/ndscids/authmonargs
-echo "phpcli=$3" >> $mountpoint/ndscids/authmonargs
-
 # Construct our user agent string:
 user_agent="openNDS(authmon;NDS:$version;)"
 
-# If we are on OpenWrt, check if ca-bundle is installed
-owrt=$(type "opkg" 2>/dev/null | grep "/")
+# Save startup arguments for libopennds
+echo "url=\"$1\"" > $mountpoint/ndscids/authmonargs
+echo "gatewayhash=\"$2\"" >> $mountpoint/ndscids/authmonargs
+echo "remotecli=\"$3\"" >> $mountpoint/ndscids/authmonargs
+echo "remoterequest=\"$remoterequest\"" >> $mountpoint/ndscids/authmonargs
+echo "user_agent=\"$user_agent\"" >> $mountpoint/ndscids/authmonargs
 
-if [ ! -z "$owrt" ]; then
-	cabundle=$(opkg list-installed | grep "ca-bundle")
-
-	if [ -z "$cabundle" ]; then
-		echo "authmon - FATAL ERROR: ca-bundle not installed - Terminating" | logger -p "daemon.err" -t "authmon[$ndspid]"
-		ndsctl stop
-		exit 1
-	fi
-fi
-
-# Call postrequest with action.
+# Call remoterequest with action.
 # Action can be "list" (list and delete from FAS auth log), "view" (view and leave in FAS auth log) or "clear" (clear any stale FAS auth log entries)
 
 # Initialise by clearing stale FAS auth log entries
 action="clear"
 payload="none"
-ret=$($phpcli -f "$postrequest" "$url" "$action" "$gatewayhash" "$user_agent" "$payload")
+acklist="*"
 
-if [ $debuglevel -ge 3 ]; then
+
+ret=$(eval "$remoterequest" "\"$url\"" "\"$action\"" "\"$gatewayhash\"" "\"$user_agent\"" "\"$payload\"")
+
+if [ "$debuglevel" -ge 3 ]; then
 	echo "authmon - action $action, response [$ret]" | logger -p "daemon.debug" -t "authmon[$ndspid]"
 fi
 
-if [ $debuglevel -ge 1 ]; then
+if [ "$debuglevel" -ge 1 ]; then
 	echo "authmon - nat_traversal_poll_interval is $loop_interval second(s)" | logger -p "daemon.notice" -t "authmon[$ndspid]"
 fi
 
@@ -150,7 +157,7 @@ while true; do
 	payload="none"
 	acklist="*"
 
-	authlist=$($phpcli -f "$postrequest" "$url" "$action" "$gatewayhash" "$user_agent" "$payload")
+	authlist=$(eval "$remoterequest" "\"$url\"" "\"$action\"" "\"$gatewayhash\"" "\"$user_agent\"" "\"$payload\"")
 
 	if [ $debuglevel -ge 3 ]; then
 		echo "authmon - authlist $authlist" | logger -p "daemon.debug" -t "authmon[$ndspid]"
@@ -187,7 +194,7 @@ while true; do
 					echo "authmon - ERROR: ndsctl is in use by another process" | logger -p "daemon.err" -t "authmon[$ndspid]"
 				fi
 
-				if [ "$authcount" < 1 ]; then
+				if [ "$authcount" -lt 1 ]; then
 					break
 				fi
 			done
@@ -206,7 +213,9 @@ while true; do
 
 	# acklist is a space separated list of the rhid's of sucessfully authenticated clients.
 	# Send acklist to the FAS for upstream processing:
-	ackresponse=$($phpcli -f "$postrequest" "$url" "$action" "$gatewayhash" "$user_agent" "$acklist")
+
+	ackresponse=$(eval "$remoterequest" "\"$url\"" "\"$action\"" "\"$gatewayhash\"" "\"$user_agent\"" "\"$acklist\"")
+
 	if [ $debuglevel -ge 3 ]; then
 		echo "authmon - remote FAS response [$ackresponse]" | logger -p "daemon.debug" -t "authmon[$ndspid]"
 	fi
